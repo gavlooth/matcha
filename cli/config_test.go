@@ -80,3 +80,22 @@ func TestEditEncryptedConfig(t *testing.T) {
 		}
 	})
 }
+
+func TestEditorCommandFromEncryptedConfigNeedsUnlockedVault(t *testing.T) {
+	keyring.MockInit()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("EDITOR", "env-editor")
+	if err := config.EnableSecureMode("test-password", &config.Config{ExternalEditor: "my-editor --wait"}); err != nil {
+		t.Fatalf("EnableSecureMode() failed: %v", err)
+	}
+	t.Cleanup(config.ClearSessionKey)
+	configPath := filepath.Join(os.Getenv("HOME"), ".config", "matcha", "config.json")
+
+	if got := editorCommandFromConfigFile(configPath); got != "my-editor --wait" {
+		t.Fatalf("unlocked vault: editor = %q, want the configured external_editor", got)
+	}
+	config.ClearSessionKey()
+	if got := editorCommandFromConfigFile(configPath); got != "env-editor" {
+		t.Fatalf("locked vault: editor = %q, want the $EDITOR fallback", got)
+	}
+}

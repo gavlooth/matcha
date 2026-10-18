@@ -37,7 +37,9 @@ func RunConfig(args []string) error {
 		return fmt.Errorf("file not found: %s", target)
 	}
 
-	if target == configPath && config.IsSecureModeEnabled() {
+	if config.IsSecureModeEnabled() {
+		// external_editor lives in the encrypted config.json, so unlocking is
+		// needed even when only a plaintext plugin file is opened.
 		password, err := promptForPassword()
 		if err != nil {
 			return fmt.Errorf("password prompt failed: %w", err)
@@ -46,12 +48,20 @@ func RunConfig(args []string) error {
 			return fmt.Errorf("incorrect password")
 		}
 		defer config.ClearSessionKey()
-		return editEncryptedConfig(configPath, runEditor, askToEditAgain)
+		if target == configPath {
+			return editEncryptedConfig(configPath, runEditor, askToEditAgain)
+		}
 	}
 
-	// Encrypted or broken config files simply yield no external_editor here.
-	configJSON, _ := os.ReadFile(configPath)
-	return runEditor(editorCommandFromConfigJSON(configJSON), target)
+	return runEditor(editorCommandFromConfigFile(configPath), target)
+}
+
+// editorCommandFromConfigFile reads external_editor from config.json,
+// decrypting it when the vault is unlocked. An unreadable or broken file
+// yields the $EDITOR/$VISUAL/vi fallback, so a broken config can still be fixed.
+func editorCommandFromConfigFile(configPath string) string {
+	configJSON, _ := config.SecureReadFile(configPath)
+	return editorCommandFromConfigJSON(configJSON)
 }
 
 // editEncryptedConfig decrypts config.json into a private temporary file, opens

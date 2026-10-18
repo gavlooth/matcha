@@ -662,7 +662,9 @@ type secureDiskConfig struct {
 	MailingLists            []MailingList                     `json:"mailing_lists,omitempty"`
 	DateFormat              string                            `json:"date_format,omitempty"`
 	Language                string                            `json:"language,omitempty"`
+	BodyCacheThresholdMB    int                               `json:"body_cache_threshold_mb,omitempty"`
 	PaginationPageSize      *PaginationPageSize               `json:"pagination_page_size,omitempty"`
+	UndoDelaySeconds        int                               `json:"undo_delay_seconds,omitempty"`
 	ExternalEditor          string                            `json:"external_editor,omitempty"`
 	PluginSettings          map[string]map[string]interface{} `json:"plugin_settings,omitempty"`
 	HasSeenSetupGuide       bool                              `json:"has_seen_setup_guide,omitempty"`
@@ -725,10 +727,13 @@ func SaveConfig(config *Config) error {
 			MailingLists:            config.MailingLists,
 			DateFormat:              config.DateFormat,
 			Language:                config.Language,
+			BodyCacheThresholdMB:    config.BodyCacheThresholdMB,
 			PaginationPageSize:      config.PaginationPageSize,
+			UndoDelaySeconds:        config.UndoDelaySeconds,
 			ExternalEditor:          config.ExternalEditor,
 			PluginSettings:          config.PluginSettings,
 			HasSeenSetupGuide:       config.HasSeenSetupGuide,
+			MouseEnabled:            config.MouseEnabled,
 			ShowOriginalOnReply:     config.ShowOriginalOnReply,
 			ShowCcBccByDefault:      config.ShowCcBccByDefault,
 		}

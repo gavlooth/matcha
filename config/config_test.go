@@ -72,6 +72,49 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	}
 }
 
+func TestSaveAndLoadConfigInSecureModeKeepsSettings(t *testing.T) {
+	keyring.MockInit()
+	t.Setenv("HOME", t.TempDir())
+	forgetVault := func() {
+		vaultMu.Lock()
+		defer vaultMu.Unlock()
+		if cachedVault != nil {
+			cachedVault.Lock()
+		}
+		cachedVault = nil
+	}
+	forgetVault()
+	t.Cleanup(forgetVault)
+
+	mouseEnabled := true
+	expectedConfig := &Config{
+		BodyCacheThresholdMB: 250,
+		UndoDelaySeconds:     12,
+		ExternalEditor:       "nvim -c startinsert",
+		MouseEnabled:         &mouseEnabled,
+		PaginationPageSize:   &PaginationPageSize{HeightFactor: 0.5},
+		Theme:                "Matcha",
+	}
+	if err := EnableSecureMode("test-password", expectedConfig); err != nil {
+		t.Fatalf("EnableSecureMode() failed: %v", err)
+	}
+	path, err := configFile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if onDisk, err := os.ReadFile(path); err != nil || json.Valid(onDisk) {
+		t.Fatalf("config.json should be encrypted on disk (read error %v)", err)
+	}
+
+	loadedConfig, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() failed: %v", err)
+	}
+	if !reflect.DeepEqual(loadedConfig, expectedConfig) {
+		t.Errorf("secure save lost settings.\nGot:  %+v\nWant: %+v", loadedConfig, expectedConfig)
+	}
+}
+
 func TestExternalEditorCommandPrecedence(t *testing.T) {
 	t.Setenv("EDITOR", "env-editor")
 	t.Setenv("VISUAL", "visual-editor")

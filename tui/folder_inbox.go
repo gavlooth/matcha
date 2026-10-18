@@ -11,6 +11,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	overlay "github.com/floatpane/bubble-overlay"
 	"github.com/floatpane/matcha/config"
 	"github.com/floatpane/matcha/fetcher"
@@ -92,15 +93,20 @@ const (
 
 // FolderInbox combines a folder sidebar with an email list.
 type FolderInbox struct {
-	folders         []string
-	unread          map[string]int
-	activeFolderIdx int
-	currentFolder   string
-	inbox           *Inbox
-	accounts        []config.Account
-	width           int
-	height          int
-	isLoadingEmails bool
+	folders          []string
+	unread           map[string]int
+	mergedFolders    []string
+	mergedUnread     map[string]int
+	foldersByAccount map[string][]string
+	unreadByAccount  map[string]map[string]int
+	folderSelection  map[string]string
+	activeFolderIdx  int
+	currentFolder    string
+	inbox            *Inbox
+	accounts         []config.Account
+	width            int
+	height           int
+	isLoadingEmails  bool
 
 	// Move-to-folder overlay state
 	movingEmail      bool
@@ -236,11 +242,16 @@ func NewFolderInbox(folders []string, accounts []config.Account) *FolderInbox {
 	inbox.SetFolderName(currentFolder)
 
 	fi := &FolderInbox{
-		folders:         folders,
-		activeFolderIdx: 0,
-		currentFolder:   currentFolder,
-		inbox:           inbox,
-		accounts:        accounts,
+		folders:          folders,
+		mergedFolders:    folders,
+		mergedUnread:     make(map[string]int),
+		foldersByAccount: make(map[string][]string),
+		unreadByAccount:  make(map[string]map[string]int),
+		folderSelection:  map[string]string{"": currentFolder},
+		activeFolderIdx:  0,
+		currentFolder:    currentFolder,
+		inbox:            inbox,
+		accounts:         accounts,
 	}
 	fi.updateHelpKeys()
 	return fi
@@ -251,6 +262,30 @@ func (m *FolderInbox) Init() tea.Cmd {
 }
 
 func (m *FolderInbox) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
+	if _, ok := msg.(remoteImagesLoadedMsg); ok {
+		if m.previewPane != nil {
+			_, cmd := m.previewPane.Update(msg)
+			return m, cmd
+		}
+		return m, nil
+	}
+	// A page can finish after the user switches folders or opens an overlay.
+	// Only change the loading state of the folder that made the request.
+	switch msg := msg.(type) {
+	case FetchingMoreEmailsMsg:
+		if msg.FolderName != "" && msg.FolderName != m.currentFolder {
+			return m, nil
+		}
+		m.inbox.isFetching = true
+		m.inbox.list.Title = m.inbox.getTitle()
+		return m, nil
+	case FolderEmailsPageFailedMsg:
+		if msg.FolderName == m.currentFolder {
+			m.inbox.isFetching = false
+			m.inbox.list.Title = m.inbox.getTitle()
+		}
+		return m, nil
+	}
 	// If move overlay is active, handle its input
 	if m.movingEmail {
 		return m.updateMoveOverlay(msg)
@@ -298,9 +333,11 @@ func (m *FolderInbox) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocycl
 		if msg.Button != tea.MouseLeft {
 			return m, nil
 		}
-		if msg.X < sidebarWidth {
-			// title(1) + PaddingBottom(1) = 2 header rows (explicit \n doesn't add a row)
-			folderIdx := msg.Y - 2
+		if msg.X < m.effectiveSidebarWidth() {
+			folderIdx := msg.Y
+			if isUIVisible("header") {
+				folderIdx -= lipgloss.Height(sidebarTitleStyle.Render(" "))
+			}
 			if folderIdx >= 0 && folderIdx < len(m.folders) {
 				m.activeFolderIdx = folderIdx
 				return m, m.switchFolder()
@@ -454,7 +491,7 @@ func (m *FolderInbox) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocycl
 		m.inbox.isRefreshing = false
 		m.inbox.SetEmails(msg.Emails, m.accounts)
 		m.inbox.SetFolderName(msg.FolderName)
-		return m, nil
+		return m, m.wrapInboxCmd(m.inbox.continueUnreadFetch())
 
 	case FolderEmailsAppendedMsg:
 		if msg.FolderName != m.currentFolder {
@@ -467,7 +504,7 @@ func (m *FolderInbox) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocycl
 				m.inbox.noMoreByAccount = make(map[string]bool)
 			}
 			m.inbox.noMoreByAccount[msg.AccountID] = true
-			return m, nil
+			return m, m.wrapInboxCmd(m.inbox.continueUnreadFetch())
 		}
 		for _, email := range msg.Emails {
 			m.inbox.emailsByAccount[email.AccountID] = append(m.inbox.emailsByAccount[email.AccountID], email)
@@ -475,7 +512,7 @@ func (m *FolderInbox) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocycl
 		}
 		m.inbox.emailCountByAcct[msg.AccountID] = len(m.inbox.emailsByAccount[msg.AccountID])
 		m.inbox.updateList()
-		return m, nil
+		return m, m.wrapInboxCmd(m.inbox.continueUnreadFetch())
 
 	case EmailMovedMsg:
 		if msg.Err != nil {
@@ -537,7 +574,13 @@ func (m *FolderInbox) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocycl
 
 	// Forward to inbox
 	var cmd tea.Cmd
+	previousAccount := m.inbox.GetCurrentAccountID()
 	_, cmd = m.inbox.Update(msg)
+	if currentAccount := m.inbox.GetCurrentAccountID(); currentAccount != previousAccount {
+		m.closeSplitPreview()
+		folderCmd := m.showAccountFolders(currentAccount)
+		return m, tea.Batch(cmd, folderCmd)
+	}
 
 	// Intercept FetchMoreEmailsMsg from inbox and convert to folder-aware version
 	if cmd != nil {
@@ -550,21 +593,36 @@ func (m *FolderInbox) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocycl
 
 // wrapInboxCmd intercepts messages from the inbox and adds folder context.
 func (m *FolderInbox) wrapInboxCmd(cmd tea.Cmd) tea.Cmd {
+	return m.wrapInboxCmdForFolder(cmd, m.currentFolder)
+}
+
+func (m *FolderInbox) wrapInboxCmdForFolder(cmd tea.Cmd, folderName string) tea.Cmd {
+	if cmd == nil {
+		return nil
+	}
 	return func() tea.Msg {
 		msg := cmd()
 		switch inner := msg.(type) {
+		case tea.BatchMsg:
+			wrapped := make(tea.BatchMsg, 0, len(inner))
+			for _, nested := range inner {
+				if nested != nil {
+					wrapped = append(wrapped, m.wrapInboxCmdForFolder(nested, folderName))
+				}
+			}
+			return wrapped
 		case FetchMoreEmailsMsg:
 			return FetchFolderMoreEmailsMsg{
 				Offset:     inner.Offset,
 				AccountID:  inner.AccountID,
-				FolderName: m.currentFolder,
+				FolderName: folderName,
 				Limit:      inner.Limit,
 			}
 		case RequestRefreshMsg:
-			inner.FolderName = m.currentFolder
+			inner.FolderName = folderName
 			return inner
 		case SearchRequestedMsg:
-			inner.FolderName = m.currentFolder
+			inner.FolderName = folderName
 			return inner
 		}
 		return msg
@@ -763,6 +821,7 @@ func (m *FolderInbox) switchFolder() tea.Cmd {
 	if m.activeFolderIdx >= 0 && m.activeFolderIdx < len(m.folders) {
 		prevFolder := m.currentFolder
 		m.currentFolder = m.folders[m.activeFolderIdx]
+		m.folderSelection[m.inbox.GetCurrentAccountID()] = m.currentFolder
 		m.isLoadingEmails = true
 		m.inbox.SetFolderName(m.currentFolder)
 		// Clear current emails while loading
@@ -867,28 +926,32 @@ func (m *FolderInbox) renderSidebar() string {
 	if isUIVisible("header") {
 		// Account name as title
 		title := t("folder_inbox.folders_title")
-		if len(m.accounts) > 0 {
-			acc := m.accounts[0]
+		if accountID := m.inbox.GetCurrentAccountID(); accountID != "" {
+			var acc config.Account
+			for _, candidate := range m.accounts {
+				if candidate.ID == accountID {
+					acc = candidate
+					break
+				}
+			}
 			if acc.Name != "" {
 				title = acc.Name
 			} else if acc.FetchEmail != "" {
 				title = acc.FetchEmail
 			}
 		}
-		b.WriteString(sidebarTitleStyle.Render(title))
+		b.WriteString(sidebarTitleStyle.Render(ansi.Truncate(title, sidebarWidth-4, "…")))
 		b.WriteString("\n")
 	}
 
 	for i, folder := range m.folders {
-		displayName := m.formatFolderName(folder)
+		var suffix string
 		unread := m.unread[folder]
-
-		var tab string
 		if unread > 0 {
-			tab = fmt.Sprintf("%s (%d)", displayName, unread)
-		} else {
-			tab = displayName
+			suffix = fmt.Sprintf(" (%d)", unread)
 		}
+		nameWidth := max(1, sidebarWidth-4-ansi.StringWidth(suffix))
+		tab := ansi.Truncate(m.formatFolderName(folder), nameWidth, "…") + suffix
 
 		if i == m.activeFolderIdx {
 			b.WriteString(activeFolderStyle.Width(sidebarWidth - 4).Render(tab))
@@ -1051,9 +1114,64 @@ func (m *FolderInbox) renderWithJumpOverlay(content string) string {
 	return overlay.Center(content, box, m.width, m.height)
 }
 
-// SetFolders updates the folder list.
+// SetFolderData supplies the merged view and each account's own folders.
+// It returns a folder switch when the current selection is unavailable after
+// a refresh, so the message list follows the new selection.
+func (m *FolderInbox) SetFolderData(merged []string, mergedUnread map[string]int, byAccount map[string][]string, unreadByAccount map[string]map[string]int) tea.Cmd {
+	m.mergedFolders = sortFolders(merged)
+	m.mergedUnread = mergedUnread
+	m.foldersByAccount = byAccount
+	m.unreadByAccount = unreadByAccount
+	return m.showAccountFolders(m.inbox.GetCurrentAccountID())
+}
+
+func (m *FolderInbox) showAccountFolders(accountID string) tea.Cmd {
+	if accountID == "" {
+		m.folders = m.mergedFolders
+		m.unread = m.mergedUnread
+	} else {
+		m.folders = sortFolders(m.foldersByAccount[accountID])
+		m.unread = m.unreadByAccount[accountID]
+	}
+	if len(m.folders) == 0 {
+		m.folders = []string{keyINBOX}
+	}
+
+	selected := m.folderSelection[accountID]
+	if selected == "" {
+		selected = keyINBOX
+	}
+	m.activeFolderIdx = 0
+	found := false
+	for i, folder := range m.folders {
+		if folder == selected {
+			m.activeFolderIdx = i
+			found = true
+			break
+		}
+	}
+	if !found {
+		selected = m.folders[0]
+	}
+	m.folderSelection[accountID] = selected
+	if selected == m.currentFolder {
+		return nil
+	}
+	previousFolder := m.currentFolder
+	m.currentFolder = selected
+	m.closeSplitPreview()
+	m.isLoadingEmails = true
+	m.inbox.SetFolderName(selected)
+	m.inbox.SetEmails(nil, m.accounts)
+	return func() tea.Msg {
+		return SwitchFolderMsg{FolderName: selected, PreviousFolder: previousFolder, AccountID: accountID}
+	}
+}
+
+// SetFolders updates the merged folder list.
 func (m *FolderInbox) SetFolders(folders []string) {
-	m.folders = sortFolders(folders)
+	m.mergedFolders = sortFolders(folders)
+	m.folders = m.mergedFolders
 	// Keep current folder if it still exists (search sorted list)
 	found := false
 	for i, f := range m.folders {
@@ -1070,31 +1188,64 @@ func (m *FolderInbox) SetFolders(folders []string) {
 }
 
 func (m *FolderInbox) SetUnreadCounts(counts map[string]int) {
+	m.mergedUnread = counts
 	m.unread = counts
 }
 
-func (m *FolderInbox) DecrementUnreadCount(folder string) {
-	if m.unread == nil {
+func (m *FolderInbox) DecrementUnreadCount(folder, accountID string) {
+	counts := m.unreadByAccount[accountID]
+	if counts == nil || counts[folder] == 0 {
 		return
 	}
-	if m.unread[folder] > 0 {
-		m.unread[folder]--
+	counts[folder]--
+	if m.mergedUnread[folder] > 0 {
+		m.mergedUnread[folder]--
 	}
 }
 
 // IncrementUnreadCount increases the unread counter for a folder. It is used to
 // restore the counter when a delete/archive action is undone.
-func (m *FolderInbox) IncrementUnreadCount(folder string) {
-	if m.unread == nil {
-		m.unread = make(map[string]int)
+func (m *FolderInbox) IncrementUnreadCount(folder, accountID string) {
+	if m.unreadByAccount[accountID] == nil {
+		m.unreadByAccount[accountID] = make(map[string]int)
 	}
-	m.unread[folder]++
+	m.unreadByAccount[accountID][folder]++
+	if m.mergedUnread == nil {
+		m.mergedUnread = make(map[string]int)
+	}
+	m.mergedUnread[folder]++
+}
+
+// GetAccountFolderData returns the folders and unread counts that belong to one account.
+func (m *FolderInbox) GetAccountFolderData(accountID string) ([]string, map[string]int) {
+	folders := append([]string(nil), m.foldersByAccount[accountID]...)
+	counts := make(map[string]int)
+	maps.Copy(counts, m.unreadByAccount[accountID])
+	return folders, counts
 }
 
 // SetEmails updates the inbox emails.
 func (m *FolderInbox) SetEmails(emails []fetcher.Email, accounts []config.Account) {
 	m.accounts = accounts
 	m.inbox.SetEmails(emails, accounts)
+}
+
+// MarkEmailAsRead updates the visible list and fills the unread-only view if
+// reading this message left too few rows.
+func (m *FolderInbox) MarkEmailAsRead(uid uint32, accountID string) tea.Cmd {
+	m.inbox.MarkEmailAsRead(uid, accountID)
+	return m.wrapInboxCmd(m.inbox.continueUnreadFetch())
+}
+
+// ContinueUnreadFetch requests another page when the active unread-only list
+// is still short after loading a folder from the cache or server.
+func (m *FolderInbox) ContinueUnreadFetch() tea.Cmd {
+	return m.wrapInboxCmd(m.inbox.continueUnreadFetch())
+}
+
+// PaginationPageSize returns the page size for this folder's inbox pane.
+func (m *FolderInbox) PaginationPageSize() uint32 {
+	return m.inbox.PaginationPageSize()
 }
 
 // GetCurrentFolder returns the currently selected folder name.

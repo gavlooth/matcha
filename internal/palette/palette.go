@@ -86,6 +86,10 @@ func Allowed(current tea.Model) bool {
 // BuildCommands assembles context-specific and global palette commands.
 func BuildCommands(current tea.Model, folderInbox *tui.FolderInbox, cfg *config.Config) []tui.PaletteCommand {
 	kb := config.Keybinds
+	unreadOnlyKey := kb.Inbox.ToggleUnreadOnly
+	if unreadOnlyKey == "" {
+		unreadOnlyKey = "U"
+	}
 	var cmds []tui.PaletteCommand
 	splitEnabled := cfg != nil && cfg.EnableSplitPane
 
@@ -95,12 +99,17 @@ func BuildCommands(current tea.Model, folderInbox *tui.FolderInbox, cfg *config.
 			tui.PaletteCommand{Title: "Toggle CC/BCC fields", Keywords: "cc bcc carbon copy blind show hide", Action: func() tea.Msg { return tui.ToggleCcBccMsg{} }},
 		)
 	case *tui.EmailView:
+		loadRemoteImagesKey := kb.Email.LoadRemoteImages
+		if loadRemoteImagesKey == "" {
+			loadRemoteImagesKey = "I"
+		}
 		cmds = append(cmds,
 			tui.PaletteCommand{Title: "Reply", Hint: kb.Email.Reply, Keywords: "respond answer", Action: KeyAction(kb.Email.Reply)},
 			tui.PaletteCommand{Title: "Forward", Hint: kb.Email.Forward, Keywords: "fwd send on", Action: KeyAction(kb.Email.Forward)},
 			tui.PaletteCommand{Title: "Archive email", Hint: kb.Email.Archive, Keywords: "file store", Action: KeyAction(kb.Email.Archive)},
 			tui.PaletteCommand{Title: "Delete email", Hint: kb.Email.Delete, Keywords: "trash remove", Action: KeyAction(kb.Email.Delete)},
 			tui.PaletteCommand{Title: "Toggle images", Hint: kb.Email.ToggleImages, Keywords: "pictures show hide", Action: KeyAction(kb.Email.ToggleImages)},
+			tui.PaletteCommand{Title: "Load remote images", Hint: loadRemoteImagesKey, Keywords: "remote content privacy tracking", Action: KeyAction(loadRemoteImagesKey)},
 		)
 		if !v.IsPreviewMode() && splitEnabled {
 			cmds = append(cmds,
@@ -114,6 +123,7 @@ func BuildCommands(current tea.Model, folderInbox *tui.FolderInbox, cfg *config.
 			tui.PaletteCommand{Title: "Search mail", Hint: kb.Inbox.Search, Keywords: "find query", Action: KeyAction(kb.Inbox.Search)},
 			tui.PaletteCommand{Title: "Filter", Hint: kb.Inbox.Filter, Keywords: "narrow", Action: KeyAction(kb.Inbox.Filter)},
 			tui.PaletteCommand{Title: "Toggle threaded view", Hint: kb.Inbox.ToggleThreaded, Keywords: "conversation thread", Action: KeyAction(kb.Inbox.ToggleThreaded)},
+			tui.PaletteCommand{Title: "Toggle unread-only view", Hint: unreadOnlyKey, Keywords: "unread read filter", Action: KeyAction(unreadOnlyKey)},
 			tui.PaletteCommand{Title: "Select / visual mode", Hint: kb.Inbox.VisualMode, Keywords: "multi batch", Action: KeyAction(kb.Inbox.VisualMode)},
 			tui.PaletteCommand{Title: "Archive selected", Hint: kb.Inbox.Archive, Keywords: "file store", Action: KeyAction(kb.Inbox.Archive)},
 			tui.PaletteCommand{Title: "Delete selected", Hint: kb.Inbox.Delete, Keywords: "trash remove", Action: KeyAction(kb.Inbox.Delete)},

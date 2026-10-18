@@ -37,16 +37,17 @@ type GlobalKeys struct {
 }
 
 type InboxKeys struct {
-	VisualMode     string `json:"visual_mode"`
-	ToggleThreaded string `json:"toggle_threaded"`
-	Delete         string `json:"delete"`
-	Archive        string `json:"archive"`
-	Refresh        string `json:"refresh"`
-	Search         string `json:"search"`
-	Filter         string `json:"filter"`
-	Open           string `json:"open"`
-	NextTab        string `json:"next_tab"`
-	PrevTab        string `json:"prev_tab"`
+	VisualMode       string `json:"visual_mode"`
+	ToggleThreaded   string `json:"toggle_threaded"`
+	ToggleUnreadOnly string `json:"toggle_unread_only"`
+	Delete           string `json:"delete"`
+	Archive          string `json:"archive"`
+	Refresh          string `json:"refresh"`
+	Search           string `json:"search"`
+	Filter           string `json:"filter"`
+	Open             string `json:"open"`
+	NextTab          string `json:"next_tab"`
+	PrevTab          string `json:"prev_tab"`
 }
 
 type EmailKeys struct {
@@ -56,6 +57,7 @@ type EmailKeys struct {
 	Delete           string `json:"delete"`
 	Archive          string `json:"archive"`
 	ToggleImages     string `json:"toggle_images"`
+	LoadRemoteImages string `json:"load_remote_images"`
 	RsvpAccept       string `json:"rsvp_accept"`
 	RsvpDecline      string `json:"rsvp_decline"`
 	RsvpTentative    string `json:"rsvp_tentative"`
@@ -124,30 +126,32 @@ func ValidateKeybinds(kb KeybindsConfig) []string {
 			"dismiss_notification": kb.Global.DismissNotification,
 		},
 		"inbox": {
-			"visual_mode":     kb.Inbox.VisualMode,
-			"toggle_threaded": kb.Inbox.ToggleThreaded,
-			keyDelete:         kb.Inbox.Delete,
-			"archive":         kb.Inbox.Archive,
-			"refresh":         kb.Inbox.Refresh,
-			"search":          kb.Inbox.Search,
-			"filter":          kb.Inbox.Filter,
-			"open":            kb.Inbox.Open,
-			"next_tab":        kb.Inbox.NextTab,
-			"prev_tab":        kb.Inbox.PrevTab,
+			"visual_mode":        kb.Inbox.VisualMode,
+			"toggle_threaded":    kb.Inbox.ToggleThreaded,
+			"toggle_unread_only": kb.Inbox.ToggleUnreadOnly,
+			keyDelete:            kb.Inbox.Delete,
+			"archive":            kb.Inbox.Archive,
+			"refresh":            kb.Inbox.Refresh,
+			"search":             kb.Inbox.Search,
+			"filter":             kb.Inbox.Filter,
+			"open":               kb.Inbox.Open,
+			"next_tab":           kb.Inbox.NextTab,
+			"prev_tab":           kb.Inbox.PrevTab,
 		},
 		"email": {
-			"reply":             kb.Email.Reply,
-			"reply_all":         kb.Email.ReplyAll,
-			"forward":           kb.Email.Forward,
-			keyDelete:           kb.Email.Delete,
-			"archive":           kb.Email.Archive,
-			"toggle_images":     kb.Email.ToggleImages,
-			"rsvp_accept":       kb.Email.RsvpAccept,
-			"rsvp_decline":      kb.Email.RsvpDecline,
-			"rsvp_tentative":    kb.Email.RsvpTentative,
-			"focus_attachments": kb.Email.FocusAttachments,
-			"apply_patch":       kb.Email.ApplyPatch,
-			"send_patch":        kb.Email.SendPatch,
+			"reply":              kb.Email.Reply,
+			"reply_all":          kb.Email.ReplyAll,
+			"forward":            kb.Email.Forward,
+			keyDelete:            kb.Email.Delete,
+			"archive":            kb.Email.Archive,
+			"toggle_images":      kb.Email.ToggleImages,
+			"load_remote_images": kb.Email.LoadRemoteImages,
+			"rsvp_accept":        kb.Email.RsvpAccept,
+			"rsvp_decline":       kb.Email.RsvpDecline,
+			"rsvp_tentative":     kb.Email.RsvpTentative,
+			"focus_attachments":  kb.Email.FocusAttachments,
+			"apply_patch":        kb.Email.ApplyPatch,
+			"send_patch":         kb.Email.SendPatch,
 		},
 		"composer": {
 			"undo_send":       kb.Composer.UndoSend,

@@ -685,7 +685,7 @@ type FetchFolderMoreEmailsMsg struct {
 
 // --- External Editor Messages ---
 
-// OpenEditorMsg signals that the composer body should be opened in $EDITOR.
+// OpenEditorMsg signals that the composer body should be opened in the external editor.
 type OpenEditorMsg struct{}
 
 // EditorFinishedMsg signals that the external editor has closed.

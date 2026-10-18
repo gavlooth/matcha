@@ -10,14 +10,12 @@ import (
 	"github.com/floatpane/matcha/tui"
 )
 
-// OpenExternalEditor writes the body to a temp file, opens $EDITOR, and reads back the result.
-func OpenExternalEditor(body string) tea.Cmd {
-	editor := os.Getenv("EDITOR")
-	if editor == "" {
-		editor = os.Getenv("VISUAL")
-	}
-	if editor == "" {
-		editor = "vi"
+// OpenExternalEditor writes the body to a temp file, opens editorCommand on it,
+// and reads back the result. editorCommand may include arguments.
+func OpenExternalEditor(editorCommand, body string) tea.Cmd {
+	parts := strings.Fields(editorCommand)
+	if len(parts) == 0 {
+		parts = []string{"vi"}
 	}
 
 	tmpFile, err := os.CreateTemp("", "matcha-*.md")
@@ -48,7 +46,6 @@ func OpenExternalEditor(body string) tea.Cmd {
 		}
 	}
 
-	parts := strings.Fields(editor)
 	args := append(parts[1:], tmpPath)   //nolint:gocritic
 	c := exec.Command(parts[0], args...) //nolint:noctx
 	return tea.ExecProcess(c, func(err error) tea.Msg {

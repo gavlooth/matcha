@@ -2129,7 +2129,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 		if composer == nil {
 			return m, nil
 		}
-		return m, editor.OpenExternalEditor(composer.GetBody())
+		return m, editor.OpenExternalEditor(m.config.ExternalEditorCommand(), composer.GetBody())
 
 	case tui.EditorFinishedMsg:
 		if msg.Err != nil {

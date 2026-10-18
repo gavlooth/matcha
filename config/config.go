@@ -219,6 +219,7 @@ type Config struct {
 	BodyCacheThresholdMB    int                 `json:"body_cache_threshold_mb,omitempty"`
 	PaginationPageSize      *PaginationPageSize `json:"pagination_page_size,omitempty"`
 	UndoDelaySeconds        int                 `json:"undo_delay_seconds,omitempty"`
+	ExternalEditor          string              `json:"external_editor,omitempty"`
 	// PluginSettings stores user-configurable values for installed plugins,
 	// keyed by plugin name then setting key. Values are JSON-native types
 	// (bool, float64, string) matching the plugin's declared schema.
@@ -265,6 +266,23 @@ func (c *Config) GetUndoDelaySeconds() int {
 		return 5
 	}
 	return c.UndoDelaySeconds
+}
+
+// ExternalEditorCommand returns the command used to edit text outside Matcha:
+// the configured external_editor first, then $EDITOR, then $VISUAL, then vi.
+// Blank values are skipped. The command may include arguments, such as
+// "nvim -c startinsert".
+func (c *Config) ExternalEditorCommand() string {
+	candidates := []string{os.Getenv("EDITOR"), os.Getenv("VISUAL")}
+	if c != nil {
+		candidates = append([]string{c.ExternalEditor}, candidates...)
+	}
+	for _, candidate := range candidates {
+		if strings.TrimSpace(candidate) != "" {
+			return candidate
+		}
+	}
+	return "vi"
 }
 
 // GetDateFormat returns the Go time reference layout translated from the
@@ -645,6 +663,7 @@ type secureDiskConfig struct {
 	DateFormat              string                            `json:"date_format,omitempty"`
 	Language                string                            `json:"language,omitempty"`
 	PaginationPageSize      *PaginationPageSize               `json:"pagination_page_size,omitempty"`
+	ExternalEditor          string                            `json:"external_editor,omitempty"`
 	PluginSettings          map[string]map[string]interface{} `json:"plugin_settings,omitempty"`
 	HasSeenSetupGuide       bool                              `json:"has_seen_setup_guide,omitempty"`
 	MouseEnabled            *bool                             `json:"mouse_enabled,omitempty"`
@@ -707,6 +726,7 @@ func SaveConfig(config *Config) error {
 			DateFormat:              config.DateFormat,
 			Language:                config.Language,
 			PaginationPageSize:      config.PaginationPageSize,
+			ExternalEditor:          config.ExternalEditor,
 			PluginSettings:          config.PluginSettings,
 			HasSeenSetupGuide:       config.HasSeenSetupGuide,
 			ShowOriginalOnReply:     config.ShowOriginalOnReply,
@@ -834,6 +854,7 @@ func LoadConfig() (*Config, error) {
 		BodyCacheThresholdMB    int                               `json:"body_cache_threshold_mb,omitempty"`
 		PaginationPageSize      *PaginationPageSize               `json:"pagination_page_size,omitempty"`
 		UndoDelaySeconds        int                               `json:"undo_delay_seconds,omitempty"`
+		ExternalEditor          string                            `json:"external_editor,omitempty"`
 		PluginSettings          map[string]map[string]interface{} `json:"plugin_settings,omitempty"`
 		HasSeenSetupGuide       bool                              `json:"has_seen_setup_guide,omitempty"`
 		MouseEnabled            *bool                             `json:"mouse_enabled,omitempty"`
@@ -884,6 +905,7 @@ func LoadConfig() (*Config, error) {
 	config.BodyCacheThresholdMB = raw.BodyCacheThresholdMB
 	config.PaginationPageSize = raw.PaginationPageSize
 	config.UndoDelaySeconds = raw.UndoDelaySeconds
+	config.ExternalEditor = raw.ExternalEditor
 	config.PluginSettings = raw.PluginSettings
 	config.HasSeenSetupGuide = raw.HasSeenSetupGuide
 	config.MouseEnabled = raw.MouseEnabled

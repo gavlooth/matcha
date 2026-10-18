@@ -26,6 +26,7 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	// Define a sample configuration to save with multiple accounts.
 	expectedConfig := &Config{
 		PaginationPageSize: &PaginationPageSize{Limit: 55},
+		ExternalEditor:     "nvim -c startinsert",
 		Accounts: []Account{
 			{
 				ID:              "test-id-1",
@@ -68,6 +69,25 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	// reflect.DeepEqual is used for a deep comparison of the structs.
 	if !reflect.DeepEqual(loadedConfig, expectedConfig) {
 		t.Errorf("Loaded config does not match expected config.\nGot:  %+v\nWant: %+v", loadedConfig, expectedConfig)
+	}
+}
+
+func TestExternalEditorCommandPrecedence(t *testing.T) {
+	t.Setenv("EDITOR", "env-editor")
+	t.Setenv("VISUAL", "visual-editor")
+	if got := (&Config{ExternalEditor: "nvim -c startinsert"}).ExternalEditorCommand(); got != "nvim -c startinsert" {
+		t.Fatalf("configured editor lost to environment: %q", got)
+	}
+	if got := (&Config{ExternalEditor: "  "}).ExternalEditorCommand(); got != "env-editor" {
+		t.Fatalf("blank configured editor: got %q, want $EDITOR", got)
+	}
+	t.Setenv("EDITOR", " ")
+	if got := (*Config)(nil).ExternalEditorCommand(); got != "visual-editor" {
+		t.Fatalf("blank $EDITOR: got %q, want $VISUAL", got)
+	}
+	t.Setenv("VISUAL", "")
+	if got := (&Config{}).ExternalEditorCommand(); got != "vi" {
+		t.Fatalf("no editor configured: got %q, want vi", got)
 	}
 }
 

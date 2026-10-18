@@ -40,8 +40,8 @@ Plugins are installed to `~/.config/matcha/plugins/` and loaded automatically on
 Open a plugin file in your editor to configure it:
 
 ```bash
-matcha config hello          # opens ~/.config/matcha/plugins/hello.lua in $EDITOR
-matcha config                # opens ~/.config/matcha/config.json in $EDITOR
+matcha config hello          # opens ~/.config/matcha/plugins/hello.lua in your editor
+matcha config                # opens ~/.config/matcha/config.json in your editor
 ```
 
 ## Submitting Your Plugin

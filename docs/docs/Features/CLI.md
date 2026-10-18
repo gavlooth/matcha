@@ -388,7 +388,7 @@ in the upstream repository.
 
 ## matcha config
 
-Open a configuration file in your `$EDITOR` (falls back to `vi`).
+Open a configuration file in the editor set by `external_editor` in `config.json`, falling back to `$EDITOR`, then `$VISUAL`, then `vi`.
 
 ```bash
 matcha config [plugin_name]

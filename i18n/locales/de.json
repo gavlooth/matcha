@@ -136,7 +136,7 @@
       "title": "Kontoeinstellungen",
       "no_accounts": "Keine Konten konfiguriert.",
       "add_account": "Neues Konto Hinzufügen",
-      "help": "↑/↓: navigieren • enter: Krypto-Konfig. bearbeiten • e: Server bearbeiten • s: Signatur bearbeiten • d: löschen"
+      "help": "↑/↓: navigieren • enter: Krypto-Konfig. bearbeiten • e: Server bearbeiten • s: Signatur bearbeiten • o: im Browser anmelden • d: löschen"
     },
     "settings_theme": {
       "title": "Design",

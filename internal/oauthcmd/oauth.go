@@ -12,7 +12,7 @@ import (
 // Run implements the CLI entrypoint for `matcha oauth`.
 // Usage:
 //
-//	matcha oauth auth   <email> [--provider gmail|outlook] [--client-id ID --client-secret SECRET]
+//	matcha oauth auth   <email> [--provider gmail|outlook|yahoo] [--client-id ID --client-secret SECRET]
 //	matcha oauth token  <email>
 //	matcha oauth revoke <email>
 func Run(args []string) {
@@ -20,18 +20,18 @@ func Run(args []string) {
 		loglevel.Infof("Usage: matcha oauth <auth|token|revoke> <email> [flags]")
 		loglevel.Infof("")
 		loglevel.Infof("Commands:")
-		loglevel.Infof("  auth   <email>  Authorize an email account via OAuth2 (opens browser)")
+		loglevel.Infof("  auth   <email>  Sign in through the browser and store tokens for Matcha")
 		loglevel.Infof("  token  <email>  Print a fresh access token (refreshes automatically)")
 		loglevel.Infof("  revoke <email>  Revoke and delete stored OAuth2 tokens")
 		loglevel.Infof("")
 		loglevel.Infof("Flags for auth:")
-		loglevel.Infof("  --provider gmail|outlook  OAuth2 provider (auto-detected from email)")
-		loglevel.Infof("  --client-id ID            OAuth2 client ID")
-		loglevel.Infof("  --client-secret SECRET    OAuth2 client secret")
+		loglevel.Infof("  --provider gmail|outlook|yahoo  OAuth2 provider (auto-detected from email)")
+		loglevel.Infof("  --client-id ID                  Your own OAuth2 app's client ID (optional)")
+		loglevel.Infof("  --client-secret SECRET          Your own OAuth2 app's client secret (optional)")
 		loglevel.Infof("")
-		loglevel.Infof("Credentials are stored per provider in:")
-		loglevel.Infof("  Gmail:   ~/.config/matcha/oauth_client.json")
-		loglevel.Infof("  Outlook: ~/.config/matcha/oauth_client_outlook.json")
+		loglevel.Infof("The app registration comes from --client-id/--client-secret (then remembered in")
+		loglevel.Infof("~/.config/matcha/oauth_client.json for Gmail, oauth_client_<provider>.json otherwise),")
+		loglevel.Infof("or from the provider's entry in ~/.config/matcha/oauth_apps.json.")
 		os.Exit(1)
 	}
 

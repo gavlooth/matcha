@@ -2,3 +2,4 @@ matcha
 result
 .demo-sandbox/
 /.agents
+__pycache__/

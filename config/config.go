@@ -21,9 +21,10 @@ import (
 const keyringServiceName = "matcha-email-client"
 
 const (
-	ProviderGmail  = "gmail"
-	ProviderICloud = "icloud"
-	ProviderCustom = "custom"
+	ProviderGmail   = "gmail"
+	ProviderOutlook = "outlook"
+	ProviderICloud  = "icloud"
+	ProviderCustom  = "custom"
 )
 
 // Date format presets use human-readable tokens. Supported tokens:

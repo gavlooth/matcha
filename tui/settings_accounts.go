@@ -71,6 +71,11 @@ func (m *Settings) updateAccounts(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+	case "o": // Sign an OAuth2 account in again through the browser
+		if m.accountsCursor < len(m.cfg.Accounts) && m.cfg.Accounts[m.accountsCursor].IsOAuth2() {
+			accountID := m.cfg.Accounts[m.accountsCursor].ID
+			return m, func() tea.Msg { return SignInWithBrowserMsg{AccountID: accountID} }
+		}
 	case "s": // Edit account signature
 		if m.accountsCursor < len(m.cfg.Accounts) {
 			return m, func() tea.Msg { return GoToSignatureEditorMsg{AccountID: m.cfg.Accounts[m.accountsCursor].ID} }

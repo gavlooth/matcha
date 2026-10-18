@@ -99,10 +99,17 @@ type StartOAuth2Msg struct {
 	Email string
 }
 
-// OAuth2CompleteMsg is sent when OAuth2 authorization completes.
+// SignInWithBrowserMsg asks to sign an OAuth2 account in again through the browser.
+type SignInWithBrowserMsg struct {
+	AccountID string
+}
+
+// OAuth2CompleteMsg is sent when the browser sign-in for an account finishes.
 type OAuth2CompleteMsg struct {
-	Email string
-	Err   error
+	AccountID        string
+	Email            string
+	Err              error
+	ReturnToSettings bool
 }
 
 type ChooseServiceMsg struct {

@@ -1,12 +1,15 @@
 package app
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/mail"
 	"net/url"
 	"os"
+	"os/exec"
 	"runtime"
 	"slices"
 	"sort"
@@ -574,11 +577,38 @@ func (m *Model) saveConfigAfterCredentials() bool {
 	return true
 }
 
-func (m *Model) runOAuth2Flow(account config.Account) tea.Cmd {
-	return func() tea.Msg {
-		err := config.RunOAuth2Flow(account.Email, account.ServiceProvider, "", "")
-		return tui.OAuth2CompleteMsg{Email: account.Email, Err: err}
+// runOAuth2Flow hands the terminal to the browser sign-in helper, which prints
+// instructions and, for Yahoo, reads the pasted redirect address.
+func (m *Model) runOAuth2Flow(account config.Account, returnToSettings bool) tea.Cmd {
+	done := func(err error) tea.Msg {
+		return tui.OAuth2CompleteMsg{AccountID: account.ID, Email: account.Email, Err: err, ReturnToSettings: returnToSettings}
 	}
+	cmd, err := account.OAuth2SignInCommand()
+	if err != nil {
+		return func() tea.Msg { return done(err) }
+	}
+	return tea.Exec(&pauseOnFailure{cmd: cmd}, done)
+}
+
+// pauseOnFailure runs a terminal command for tea.Exec and, when it fails, waits
+// for Enter so its error output stays readable before the TUI redraws.
+type pauseOnFailure struct {
+	cmd    *exec.Cmd
+	stdin  io.Reader
+	stdout io.Writer
+}
+
+func (p *pauseOnFailure) SetStdin(r io.Reader)  { p.stdin, p.cmd.Stdin = r, r }
+func (p *pauseOnFailure) SetStdout(w io.Writer) { p.stdout, p.cmd.Stdout = w, w }
+func (p *pauseOnFailure) SetStderr(w io.Writer) { p.cmd.Stderr = w }
+
+func (p *pauseOnFailure) Run() error {
+	err := p.cmd.Run()
+	if err != nil && p.stdin != nil && p.stdout != nil {
+		_, _ = fmt.Fprint(p.stdout, "\nSign-in failed. Press Enter to return to Matcha.")
+		_, _ = bufio.NewReader(p.stdin).ReadString('\n')
+	}
+	return err
 }
 
 func (m *Model) afterConfigSaved() {
@@ -1015,9 +1045,30 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 		}
 		return m, m.setChoiceMenu()
 
+	case tui.SignInWithBrowserMsg:
+		if acc := m.config.GetAccountByID(msg.AccountID); acc != nil {
+			return m, m.runOAuth2Flow(*acc, true)
+		}
+		return m, nil
+
 	case tui.OAuth2CompleteMsg:
 		if msg.Err != nil {
-			log.Printf("OAuth2 authorization failed: %v", msg.Err)
+			log.Printf("OAuth2 sign-in for %s failed: %v", msg.Email, msg.Err)
+		} else if acc := m.config.GetAccountByID(msg.AccountID); acc != nil && acc.OAuthTokenCmd != "" {
+			// The account now has Matcha's own tokens; stop asking the external command.
+			acc.OAuthTokenCmd = ""
+			if err := config.SaveConfig(m.config); err != nil {
+				log.Printf("could not save config: %v", err)
+			} else {
+				m.afterConfigSaved()
+			}
+		}
+		if msg.ReturnToSettings {
+			if _, ok := m.current.(*tui.Settings); !ok {
+				m.current = m.newSettings()
+				m.updateCurrentWindowSize()
+			}
+			return m, nil
 		}
 		return m, m.setChoiceMenu()
 
@@ -1034,8 +1085,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 				lastAccount = *acc
 			}
 		}
-		if lastAccount.IsOAuth2() {
-			return m, m.runOAuth2Flow(lastAccount)
+		// Editing server settings keeps the existing sign-in; use "o" in the
+		// account settings to sign in again.
+		if lastAccount.IsOAuth2() && !isEdit {
+			return m, m.runOAuth2Flow(lastAccount, false)
 		}
 		if isEdit {
 			m.current = m.newSettings()

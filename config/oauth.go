@@ -95,26 +95,20 @@ func (a *Account) OAuth2AccessToken() (string, error) {
 	return token, nil
 }
 
-// RunOAuth2Flow launches the OAuth2 authorization flow by invoking the Python
-// helper script. It opens the user's browser for authorization.
-// provider should be "gmail" or "outlook". If empty, the script auto-detects from the email.
-// clientID and clientSecret are optional — if empty, the script uses stored credentials.
-func RunOAuth2Flow(email, provider, clientID, clientSecret string) error {
+// OAuth2SignInCommand returns the command that signs the account in through
+// the browser and stores Matcha's own tokens for it. It talks to the user on
+// the terminal (a redirect address that cannot be served locally is pasted
+// back), so run it with the terminal attached, e.g. via tea.Exec. The app
+// registration comes from ~/.config/matcha/oauth_apps.json or oauth_client*.json.
+func (a *Account) OAuth2SignInCommand() (*exec.Cmd, error) {
 	script, err := OAuthScriptPath()
 	if err != nil {
-		return err
+		return nil, err
 	}
-
-	args := []string{script, "auth", email}
-	if provider != "" {
-		args = append(args, "--provider", provider)
+	args := []string{script, "auth", a.Email}
+	// Other providers (e.g. "custom" for Yahoo) are detected from the address.
+	if a.ServiceProvider == ProviderGmail || a.ServiceProvider == ProviderOutlook {
+		args = append(args, "--provider", a.ServiceProvider)
 	}
-	if clientID != "" && clientSecret != "" {
-		args = append(args, "--client-id", clientID, "--client-secret", clientSecret)
-	}
-
-	cmd := exec.Command("python3", args...) //nolint:noctx
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	return exec.Command("python3", args...), nil //nolint:noctx
 }

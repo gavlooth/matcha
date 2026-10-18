@@ -136,7 +136,7 @@
       "title": "Configurações de Contas",
       "no_accounts": "Nenhuma conta configurada.",
       "add_account": "Adicionar Nova Conta",
-      "help": "↑/↓: navegar • enter: editar config. de criptografia • e: editar servidor • s: editar assinatura • d: excluir"
+      "help": "↑/↓: navegar • enter: editar config. de criptografia • e: editar servidor • s: editar assinatura • o: entrar pelo navegador • d: excluir"
     },
     "settings_theme": {
       "title": "Tema",

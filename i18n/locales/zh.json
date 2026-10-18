@@ -135,7 +135,7 @@
       "title": "账户设置",
       "no_accounts": "未配置账户。",
       "add_account": "添加新账户",
-      "help": "↑/↓: 导航 • enter: 编辑加密配置 • e: 编辑服务器 • s: 编辑签名 • d: 删除"
+      "help": "↑/↓: 导航 • enter: 编辑加密配置 • e: 编辑服务器 • s: 编辑签名 • o: 通过浏览器登录 • d: 删除"
     },
     "settings_theme": {
       "title": "主题",

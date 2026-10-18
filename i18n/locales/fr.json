@@ -136,7 +136,7 @@
       "title": "Paramètres des Comptes",
       "no_accounts": "Aucun compte configuré.",
       "add_account": "Ajouter un Nouveau Compte",
-      "help": "↑/↓: naviguer • entrée: modifier config. crypto • e: modifier serveur • s: modifier signature • d: supprimer"
+      "help": "↑/↓: naviguer • entrée: modifier config. crypto • e: modifier serveur • s: modifier signature • o: se connecter dans le navigateur • d: supprimer"
     },
     "settings_theme": {
       "title": "Thème",

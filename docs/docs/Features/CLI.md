@@ -426,10 +426,10 @@ Automatically detects your installation method (Homebrew, Snap, Flatpak, WinGet,
 
 ## matcha oauth
 
-Manage OAuth2 authorization for Gmail and Outlook.
+Sign accounts in through the browser for Gmail, Outlook and Yahoo. The same sign-in is available in the TUI under Settings → Accounts with `o`.
 
 ```bash
-matcha oauth auth <email>                        # Authorize an account (opens browser, auto-detects provider)
+matcha oauth auth <email>                        # Sign in (opens browser, auto-detects provider)
 matcha oauth auth <email> --provider outlook     # Specify provider explicitly
 matcha oauth token <email>                       # Print a fresh access token
 matcha oauth revoke <email>                      # Revoke and delete stored tokens
@@ -437,9 +437,25 @@ matcha oauth revoke <email>                      # Revoke and delete stored toke
 
 `matcha gmail` is kept as an alias for backwards compatibility.
 
-Client credentials are stored per provider:
-- Gmail: `~/.config/matcha/oauth_client.json` — see the [Gmail setup guide](../setup-guides/gmail.md)
-- Outlook: `~/.config/matcha/oauth_client_outlook.json` — see the [Outlook setup guide](../setup-guides/outlook.md)
+Signing in needs an OAuth app registration for the provider. Matcha looks for one in this order:
+
+1. `--client-id` and `--client-secret` on the command line; they are then stored per provider in `~/.config/matcha/oauth_client.json` (Gmail) or `~/.config/matcha/oauth_client_<provider>.json`, and the browser returns to `http://localhost:8189`. See the [Gmail](../setup-guides/gmail.md) and [Outlook](../setup-guides/outlook.md) setup guides.
+2. The provider's entry in `~/.config/matcha/oauth_apps.json`, a local file Matcha never writes:
+
+   ```json
+   {
+     "gmail":   {"client_id": "…", "client_secret": "…", "redirect_uri": "http://127.0.0.1"},
+     "outlook": {"client_id": "…", "redirect_uri": "http://127.0.0.1"},
+     "yahoo":   {"client_id": "…", "redirect_uri": "https://127.0.0.1"}
+   }
+   ```
+
+   `client_secret` is optional for public clients. An `http` redirect on `127.0.0.1` or `localhost` is served by Matcha (on a free port when the address has none), so the browser returns automatically. Any other redirect address cannot be served locally: after signing in the browser shows a page that cannot be reached; copy that page's address into the terminal.
+3. The stored `oauth_client*.json` from an earlier `--client-id` sign-in.
+
+Sign-in uses PKCE and checks that the browser's answer belongs to the sign-in that was started. Use only app registrations you are allowed to use; the provider's consent screen shows the registration's name.
+
+Signing in from the TUI (Settings → Accounts → `o`) also clears the account's `oauth_token_cmd`, so the account uses Matcha's own tokens from then on. `matcha oauth auth` does not change `config.json`; remove `oauth_token_cmd` yourself if the account has one.
 
 ## matcha version
 

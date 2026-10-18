@@ -51,7 +51,7 @@ On startup, `MigrateCacheFiles()` moves any cache files from the old location (`
 | `encryption.go` | Optional at-rest encryption using AES-256-GCM with Argon2id key derivation. Provides `SecureReadFile`/`SecureWriteFile` (transparent encryption wrappers used by all other files), `EnableSecureMode`/`DisableSecureMode`, password verification via an encrypted sentinel phrase, and session key management. |
 | `signature.go` | Loads and saves the user's email signature from `~/.config/matcha/signature.txt`. |
 | `oauth.go` | OAuth2 integration — token retrieval, authorization flow launcher, and embedded Python helper extraction. |
-| `oauth_script.py` | Embedded OAuth2 helper script supporting Gmail and Outlook (browser-based auth, token refresh, secure storage). |
+| `oauth_script.py` | Embedded OAuth2 helper script supporting Gmail, Outlook and Yahoo (browser-based auth, token refresh, secure storage). |
 | `config_test.go` | Unit tests for configuration logic. |
 
 ## Encryption
@@ -92,14 +92,14 @@ Attachment binary data is not cached — only metadata (filename, MIME type, par
 
 ## OAuth2 / XOAUTH2
 
-Accounts with `auth_method: "oauth2"` use the XOAUTH2 mechanism instead of passwords. This is supported for Gmail and Outlook. The flow works across three layers:
+Accounts with `auth_method: "oauth2"` use the XOAUTH2 mechanism instead of passwords. This is supported for Gmail, Outlook and Yahoo. The flow works across three layers:
 
-1. **`config/oauth.go`** — Go-side orchestration. Extracts the embedded Python helper to `~/.config/matcha/oauth/` (only when it changed, through an atomic rename), invokes it to run the browser-based authorization flow (`RunOAuth2Flow`), and returns fresh access tokens through `Account.OAuth2AccessToken()`. When an account sets `oauth_token_cmd`, that shell command supplies the access token instead of the Python helper. The `IsOAuth2()` method on `Account` checks the auth method.
+1. **`config/oauth.go`** — Go-side orchestration. Extracts the embedded Python helper to `~/.config/matcha/oauth/` (only when it changed, through an atomic rename), builds the interactive browser sign-in command (`Account.OAuth2SignInCommand()`, run by the TUI with the terminal attached), and returns fresh access tokens through `Account.OAuth2AccessToken()`. When an account sets `oauth_token_cmd`, that shell command supplies the access token instead of the Python helper. The `IsOAuth2()` method on `Account` checks the auth method.
 
-2. **`config/oauth_script.py`** — Embedded Python script that handles the full OAuth2 lifecycle for both Gmail and Outlook:
-   - `auth` — Opens a browser for authorization (Google or Microsoft), captures the callback on `localhost:8189`, exchanges the code for tokens, and saves them to `~/.config/matcha/oauth_tokens/`. The provider is auto-detected from the email domain or can be specified with `--provider`.
-   - `token` — Returns a fresh access token, automatically refreshing if expired (with a 5-minute buffer).
+2. **`config/oauth_script.py`** — Embedded Python script that handles the full OAuth2 lifecycle for Gmail, Outlook and Yahoo:
+   - `auth` — Opens a browser for authorization with PKCE, using the provider's app registration from `--client-id`/`--client-secret`, `~/.config/matcha/oauth_apps.json` (local, never committed) or `oauth_client*.json`, in that order. An `http` redirect on `127.0.0.1`/`localhost` is served by a local listener (a free port when none is given; registrations from `--client-id` or `oauth_client*.json` use `localhost:8189`); any other redirect address is pasted back by the user. Tokens, together with the client that issued them, are saved to `~/.config/matcha/oauth_tokens/`. The provider is auto-detected from the email domain or can be specified with `--provider`.
+   - `token` — Returns a fresh access token, automatically refreshing if expired (with a 5-minute buffer). A per-account file lock keeps concurrent requests from refreshing at the same time.
    - `revoke` — Revokes tokens and deletes local storage.
-   - Client credentials are stored per provider: `~/.config/matcha/oauth_client.json` (Gmail), `~/.config/matcha/oauth_client_outlook.json` (Outlook).
+   - The user's own client credentials are stored per provider: `~/.config/matcha/oauth_client.json` (Gmail), `~/.config/matcha/oauth_client_<provider>.json` (others).
 
 3. **`fetcher/xoauth2.go`** — Implements the XOAUTH2 SASL mechanism (`sasl.Client` interface) for IMAP/SMTP authentication. Formats the initial response as `user=<email>\x01auth=Bearer <token>\x01\x01` per the XOAUTH2 protocol spec.

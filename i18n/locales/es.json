@@ -142,7 +142,7 @@
       "title": "Configuración de Cuentas",
       "no_accounts": "No hay cuentas configuradas.",
       "add_account": "Agregar Nueva Cuenta",
-      "help": "↑/↓: navegar • enter: editar config. de cifrado • e: editar servidor • s: editar firma • d: eliminar"
+      "help": "↑/↓: navegar • enter: editar config. de cifrado • e: editar servidor • s: editar firma • o: iniciar sesión en el navegador • d: eliminar"
     },
     "settings_theme": {
       "title": "Tema",

@@ -118,3 +118,15 @@ When encryption is enabled, account passwords are stored inside the encrypted `c
 ## Password Command
 
 Instead of storing a password in the OS keyring, you can set `pass_cmd` on an account to have matcha fetch the password from an external command (e.g. `pass`, `gopass`, or an age script). See [Password Command](/Features/PassCmd) for details.
+
+## OAuth2 Token Command
+
+For an account with `"auth_method": "oauth2"`, set `oauth_token_cmd` to a shell command that prints a current access token on stdout. Matcha runs it for every IMAP and SMTP login instead of its own OAuth2 helper, so you can reuse tokens another mail client already holds (for example a script that refreshes Thunderbird's saved login). The command is responsible for caching and refreshing; its error output is shown in Matcha's error message.
+
+```json
+{
+  "email": "you@gmail.com",
+  "auth_method": "oauth2",
+  "oauth_token_cmd": "~/.local/libexec/thunderbird-oauth-token you@gmail.com"
+}
+```

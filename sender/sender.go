@@ -766,7 +766,7 @@ func deliverSMTP(account *config.Account, smtpServer string, smtpPort int, allRe
 		mechList := strings.ToUpper(mechs)
 		switch {
 		case account.IsOAuth2():
-			token, tokenErr := config.GetOAuth2Token(account.Email)
+			token, tokenErr := account.OAuth2AccessToken()
 			if tokenErr != nil {
 				return fmt.Errorf("oauth2: %w", tokenErr)
 			}
@@ -973,7 +973,7 @@ func SendCalendarReply(account *config.Account, to []string, subject, plainBody 
 		mechList := strings.ToUpper(mechs)
 		switch {
 		case account.IsOAuth2():
-			token, tokenErr := config.GetOAuth2Token(account.Email)
+			token, tokenErr := account.OAuth2AccessToken()
 			if tokenErr != nil {
 				return nil, fmt.Errorf("oauth2: %w", tokenErr)
 			}

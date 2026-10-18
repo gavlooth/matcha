@@ -17,4 +17,4 @@ This package is the IMAP client layer for Matcha. It:
 
 ## XOAUTH2
 
-The `xoauth2.go` file implements the XOAUTH2 SASL mechanism as a `sasl.Client`. When an account uses `auth_method: "oauth2"`, the fetcher calls `config.GetOAuth2Token()` to get a fresh access token, then authenticates the IMAP connection using this SASL client instead of a password. The initial response follows Google's XOAUTH2 protocol: `user=<email>\x01auth=Bearer <token>\x01\x01`.
+The `xoauth2.go` file implements the XOAUTH2 SASL mechanism as a `sasl.Client`. When an account uses `auth_method: "oauth2"`, the fetcher calls `account.OAuth2AccessToken()` to get a fresh access token (from the account's `oauth_token_cmd` or the built-in helper), then authenticates the IMAP connection using this SASL client instead of a password. The initial response follows Google's XOAUTH2 protocol: `user=<email>\x01auth=Bearer <token>\x01\x01`.

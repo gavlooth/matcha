@@ -94,7 +94,7 @@ Attachment binary data is not cached — only metadata (filename, MIME type, par
 
 Accounts with `auth_method: "oauth2"` use the XOAUTH2 mechanism instead of passwords. This is supported for Gmail and Outlook. The flow works across three layers:
 
-1. **`config/oauth.go`** — Go-side orchestration. Extracts the embedded Python helper to `~/.config/matcha/oauth/`, invokes it to run the browser-based authorization flow (`RunOAuth2Flow`) or to retrieve a fresh access token (`GetOAuth2Token`). The `IsOAuth2()` method on `Account` checks the auth method.
+1. **`config/oauth.go`** — Go-side orchestration. Extracts the embedded Python helper to `~/.config/matcha/oauth/` (only when it changed, through an atomic rename), invokes it to run the browser-based authorization flow (`RunOAuth2Flow`), and returns fresh access tokens through `Account.OAuth2AccessToken()`. When an account sets `oauth_token_cmd`, that shell command supplies the access token instead of the Python helper. The `IsOAuth2()` method on `Account` checks the auth method.
 
 2. **`config/oauth_script.py`** — Embedded Python script that handles the full OAuth2 lifecycle for both Gmail and Outlook:
    - `auth` — Opens a browser for authorization (Google or Microsoft), captures the callback on `localhost:8189`, exchanges the code for tokens, and saves them to `~/.config/matcha/oauth_tokens/`. The provider is auto-detected from the email domain or can be specified with `--provider`.

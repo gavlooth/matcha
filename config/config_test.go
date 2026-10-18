@@ -35,6 +35,8 @@ func TestSaveAndLoadConfig(t *testing.T) {
 				Password:        "supersecret",
 				ServiceProvider: "gmail",
 				SendAsEmail:     "alias@example.com",
+				AuthMethod:      "oauth2",
+				OAuthTokenCmd:   "token-helper test@example.com",
 				SC:              &SessionCache{},
 			},
 			{

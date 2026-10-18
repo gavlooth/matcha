@@ -441,7 +441,7 @@ func connectWithOptions(account *config.Account, extraOpts *imapclient.Options) 
 
 	// Authenticate using OAuth2 (XOAUTH2) or plain password
 	if account.IsOAuth2() {
-		token, err := config.GetOAuth2Token(account.Email)
+		token, err := account.OAuth2AccessToken()
 		if err != nil {
 			return nil, fmt.Errorf("oauth2: %w", err)
 		}

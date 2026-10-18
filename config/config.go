@@ -113,6 +113,10 @@ type Account struct {
 
 	// OAuth2 settings
 	AuthMethod string `json:"auth_method,omitempty"` // "password" (default) or "oauth2"
+	// OAuthTokenCmd is a shell command whose stdout is a current OAuth2 access
+	// token (e.g. a helper that reads another mail client's saved login). When
+	// set on an oauth2 account it replaces Matcha's built-in OAuth2 helper.
+	OAuthTokenCmd string `json:"oauth_token_cmd,omitempty"`
 	// PassCmd is a shell command whose stdout is used as the password (e.g. "pass show email/user").
 	// When set, the keyring is bypassed and the command is evaluated at startup.
 	PassCmd string `json:"pass_cmd,omitempty"`
@@ -637,6 +641,7 @@ type secureDiskAccount struct {
 	PGPPIN             string `json:"pgp_pin,omitempty"`
 	PGPSignByDefault   bool   `json:"pgp_sign_by_default,omitempty"`
 	AuthMethod         string `json:"auth_method,omitempty"`
+	OAuthTokenCmd      string `json:"oauth_token_cmd,omitempty"`
 	PassCmd            string `json:"pass_cmd,omitempty"`
 	Protocol           string `json:"protocol,omitempty"`
 	JMAPEndpoint       string `json:"jmap_endpoint,omitempty"`
@@ -766,6 +771,7 @@ func SaveConfig(config *Config) error {
 				PGPPIN:             acc.PGPPIN,
 				PGPSignByDefault:   acc.PGPSignByDefault,
 				AuthMethod:         acc.AuthMethod,
+				OAuthTokenCmd:      acc.OAuthTokenCmd,
 				PassCmd:            acc.PassCmd,
 				Protocol:           acc.Protocol,
 				JMAPEndpoint:       acc.JMAPEndpoint,
@@ -832,6 +838,7 @@ func LoadConfig() (*Config, error) {
 		PGPPIN             string `json:"pgp_pin,omitempty"`
 		PGPSignByDefault   bool   `json:"pgp_sign_by_default,omitempty"`
 		AuthMethod         string `json:"auth_method,omitempty"`
+		OAuthTokenCmd      string `json:"oauth_token_cmd,omitempty"`
 		PassCmd            string `json:"pass_cmd,omitempty"`
 		Protocol           string `json:"protocol,omitempty"`
 		JMAPEndpoint       string `json:"jmap_endpoint,omitempty"`
@@ -939,6 +946,7 @@ func LoadConfig() (*Config, error) {
 			PGPKeySource:       rawAcc.PGPKeySource,
 			PGPSignByDefault:   rawAcc.PGPSignByDefault,
 			AuthMethod:         rawAcc.AuthMethod,
+			OAuthTokenCmd:      rawAcc.OAuthTokenCmd,
 			PassCmd:            rawAcc.PassCmd,
 			Protocol:           rawAcc.Protocol,
 			JMAPEndpoint:       rawAcc.JMAPEndpoint,

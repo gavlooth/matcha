@@ -13,9 +13,10 @@ import (
 )
 
 func TestFolderInboxFoldersFollowAccountTabs(t *testing.T) {
+	const outlookID, yahooID = "outlook-account", "yahoo-account"
 	accounts := []config.Account{
-		{ID: "outlook", Name: "Outlook", FetchEmail: "outlook@example.com"},
-		{ID: "yahoo", Name: "Yahoo", FetchEmail: "yahoo@example.com"},
+		{ID: outlookID, Name: "Outlook", FetchEmail: "outlook@example.com"},
+		{ID: yahooID, Name: "Yahoo", FetchEmail: "yahoo@example.com"},
 	}
 	fi := NewFolderInbox([]string{keyINBOX}, accounts)
 	fi.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
@@ -23,12 +24,12 @@ func TestFolderInboxFoldersFollowAccountTabs(t *testing.T) {
 		[]string{keyINBOX, "Outlook only", "Yahoo only"},
 		map[string]int{keyINBOX: 5, "Outlook only": 2, "Yahoo only": 3},
 		map[string][]string{
-			"outlook": {keyINBOX, "Outlook only"},
-			"yahoo":   {keyINBOX, "Yahoo only"},
+			outlookID: {keyINBOX, "Outlook only"},
+			yahooID:   {keyINBOX, "Yahoo only"},
 		},
 		map[string]map[string]int{
-			"outlook": {keyINBOX: 2, "Outlook only": 2},
-			"yahoo":   {keyINBOX: 3, "Yahoo only": 3},
+			outlookID: {keyINBOX: 2, "Outlook only": 2},
+			yahooID:   {keyINBOX: 3, "Yahoo only": 3},
 		},
 	)
 	if !strings.Contains(fi.renderSidebar(), "Folders") || fi.unread[keyINBOX] != 5 {
@@ -52,8 +53,8 @@ func TestFolderInboxFoldersFollowAccountTabs(t *testing.T) {
 	if fi.currentFolder != "Outlook only" {
 		t.Fatalf("Outlook folder selection was not restored: %q", fi.currentFolder)
 	}
-	fi.DecrementUnreadCount("Outlook only", "outlook")
-	_, counts := fi.GetAccountFolderData("outlook")
+	fi.DecrementUnreadCount("Outlook only", outlookID)
+	_, counts := fi.GetAccountFolderData(outlookID)
 	if counts["Outlook only"] != 1 || fi.unread["Outlook only"] != 1 {
 		t.Fatalf("account unread count did not update: %v", counts)
 	}

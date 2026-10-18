@@ -67,7 +67,10 @@ func editEncryptedConfig(
 		return fmt.Errorf("cannot decrypt %s: %w", configPath, err)
 	}
 
-	dir, err := os.MkdirTemp("", "matcha-config-")
+	// XDG_RUNTIME_DIR is a per-user tmpfs on most Linux systems, so the
+	// decrypted copy never reaches a disk there. Elsewhere the system temp
+	// directory is used.
+	dir, err := os.MkdirTemp(os.Getenv("XDG_RUNTIME_DIR"), "matcha-config-")
 	if err != nil {
 		return err
 	}

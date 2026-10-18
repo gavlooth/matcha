@@ -390,7 +390,7 @@ in the upstream repository.
 
 Open a configuration file in the editor set by `external_editor` in `config.json`, falling back to `$EDITOR`, then `$VISUAL`, then `vi`.
 
-When encryption is enabled, `matcha config` asks for your password, opens a decrypted copy of `config.json` in a private temporary directory, and encrypts your changes back into place. Invalid JSON is not saved; you are asked whether to edit again. The decrypted copy is deleted afterwards.
+When encryption is enabled, `matcha config` asks for your password, opens a decrypted copy of `config.json` in a private temporary directory (under `$XDG_RUNTIME_DIR` when set, which is memory-backed on most Linux systems, otherwise the system temp directory), and encrypts your changes back into place. Invalid JSON is not saved; you are asked whether to edit again. The decrypted copy, which includes account passwords, exists only while the editor is open and is deleted afterwards; if Matcha is killed during the edit, delete the leftover `matcha-config-*` directory yourself.
 
 ```bash
 matcha config [plugin_name]

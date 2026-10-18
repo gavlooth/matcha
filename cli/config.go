@@ -68,9 +68,12 @@ func editEncryptedConfig(
 	}
 
 	// XDG_RUNTIME_DIR is a per-user tmpfs on most Linux systems, so the
-	// decrypted copy never reaches a disk there. Elsewhere the system temp
-	// directory is used.
+	// decrypted copy stays in memory there. When it is unset or unusable the
+	// system temp directory is used.
 	dir, err := os.MkdirTemp(os.Getenv("XDG_RUNTIME_DIR"), "matcha-config-")
+	if err != nil {
+		dir, err = os.MkdirTemp("", "matcha-config-")
+	}
 	if err != nil {
 		return err
 	}

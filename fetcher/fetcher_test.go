@@ -64,6 +64,25 @@ func TestDecodeReaderWithCharsetSurvivesUnknownCharset(t *testing.T) {
 	}
 }
 
+func TestDecodeTextPartConvertsDeclaredCharset(t *testing.T) {
+	// "Δήλωση" in ISO-8859-7 is C4 DE EB F9 F3 E7.
+	cases := []struct {
+		name, data, transferEncoding, charset string
+	}{
+		{"quoted-printable greek", "=C4=DE=EB=F9=F3=E7", "quoted-printable", "iso-8859-7"},
+		{"base64 greek", "xN7r+fPn", "base64", "ISO-8859-7"},
+		{"base64 utf-8", "zpTOrs67z4nPg863", "base64", "utf-8"},
+		{"no charset means utf-8", "Δήλωση", "8bit", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := decodeTextPart([]byte(tc.data), tc.transferEncoding, tc.charset); got != "Δήλωση" {
+				t.Fatalf("decodeTextPart() = %q, want %q", got, "Δήλωση")
+			}
+		})
+	}
+}
+
 func TestLookupCharsetEncodingAlwaysReturnsNonNil(t *testing.T) {
 	cases := []string{"", "utf-8", "iso-8859-1", "bogus-charset-name", "this/is/not/real"}
 	for _, name := range cases {

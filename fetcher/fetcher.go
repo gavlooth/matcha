@@ -1297,23 +1297,28 @@ func FetchEmailBodyFromMailbox(account *config.Account, mailbox string, uid uint
 
 		if len(msgs) > 0 {
 			if buf := msgs[0].FindBodySection(section); buf != nil {
-				// Use the encoding from BodyStructure to decode
-				decoded, err := decodeAttachmentData(buf, textPartEncoding)
-				if err != nil {
-					decoded = buf
-				}
-				// Then convert the part's declared charset (e.g. iso-8859-7) to UTF-8.
-				if textPartCharset != "" && !strings.EqualFold(textPartCharset, "utf-8") {
-					if converted, convErr := decodeReaderWithCharset(bytes.NewReader(decoded), textPartCharset); convErr == nil {
-						decoded = converted
-					}
-				}
-				body = string(decoded)
+				body = decodeTextPart(buf, textPartEncoding, textPartCharset)
 			}
 		}
 	}
 
 	return body, bodyMIMEType, attachments, nil
+}
+
+// decodeTextPart undoes the part's transfer encoding (base64,
+// quoted-printable) and converts its declared charset to UTF-8. Data that
+// cannot be decoded is returned as received.
+func decodeTextPart(data []byte, transferEncoding, charset string) string {
+	decoded, err := decodeAttachmentData(data, transferEncoding)
+	if err != nil {
+		decoded = data
+	}
+	if charset != "" && !strings.EqualFold(charset, "utf-8") {
+		if converted, convErr := decodeReaderWithCharset(bytes.NewReader(decoded), charset); convErr == nil {
+			decoded = converted
+		}
+	}
+	return string(decoded)
 }
 
 func FetchAttachmentFromMailbox(account *config.Account, mailbox string, uid uint32, partID string, encoding string) ([]byte, error) {

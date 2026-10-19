@@ -782,8 +782,8 @@ func FetchEmailBodyFromMailbox(account *config.Account, mailbox string, uid uint
 		senderEmail = msg.Envelope.From[0].Addr()
 	}
 
-	var plainPartID, plainPartEncoding string
-	var htmlPartID, htmlPartEncoding string
+	var plainPartID, plainPartEncoding, plainPartCharset string
+	var htmlPartID, htmlPartEncoding, htmlPartCharset string
 	var attachments []Attachment
 	var extractedBody string // Used if we intercept and decrypt a payload
 	// MIME type of extractedBody. Set alongside every assignment to extractedBody
@@ -801,11 +801,13 @@ func FetchEmailBodyFromMailbox(account *config.Account, mailbox string, uid uint
 				if htmlPartID == "" {
 					htmlPartID = partID
 					htmlPartEncoding = part.Encoding
+					htmlPartCharset = part.Params["charset"]
 				}
 			case "plain":
 				if plainPartID == "" {
 					plainPartID = partID
 					plainPartEncoding = part.Encoding
+					plainPartCharset = part.Params["charset"]
 				}
 			}
 		}
@@ -1250,13 +1252,16 @@ func FetchEmailBodyFromMailbox(account *config.Account, mailbox string, uid uint
 	var bodyMIMEType string
 	textPartID := ""
 	textPartEncoding := ""
+	textPartCharset := ""
 	if htmlPartID != "" {
 		textPartID = htmlPartID
 		textPartEncoding = htmlPartEncoding
+		textPartCharset = htmlPartCharset
 		bodyMIMEType = mimeTextHTML
 	} else if plainPartID != "" {
 		textPartID = plainPartID
 		textPartEncoding = plainPartEncoding
+		textPartCharset = plainPartCharset
 		bodyMIMEType = mimeTextPlain
 	}
 	if os.Getenv("DEBUG_KITTY_IMAGES") != "" {
@@ -1293,11 +1298,17 @@ func FetchEmailBodyFromMailbox(account *config.Account, mailbox string, uid uint
 		if len(msgs) > 0 {
 			if buf := msgs[0].FindBodySection(section); buf != nil {
 				// Use the encoding from BodyStructure to decode
-				if decoded, err := decodeAttachmentData(buf, textPartEncoding); err == nil {
-					body = string(decoded)
-				} else {
-					body = string(buf)
+				decoded, err := decodeAttachmentData(buf, textPartEncoding)
+				if err != nil {
+					decoded = buf
 				}
+				// Then convert the part's declared charset (e.g. iso-8859-7) to UTF-8.
+				if textPartCharset != "" && !strings.EqualFold(textPartCharset, "utf-8") {
+					if converted, convErr := decodeReaderWithCharset(bytes.NewReader(decoded), textPartCharset); convErr == nil {
+						decoded = converted
+					}
+				}
+				body = string(decoded)
 			}
 		}
 	}

@@ -1,12 +1,14 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/floatpane/matcha/backend"
 	"github.com/floatpane/matcha/config"
 	"github.com/floatpane/matcha/fetcher"
@@ -709,5 +711,31 @@ func TestThreadedStatusBarCountsActualEmails(t *testing.T) {
 	inbox.updateList()
 	if inbox.totalEmailCount != 4 {
 		t.Fatalf("expected totalEmailCount=4 after expand, got %d", inbox.totalEmailCount)
+	}
+}
+
+func TestAccountTabsFitNarrowInboxAndLastTabIsClickable(t *testing.T) {
+	accounts := []config.Account{
+		{ID: "o", Email: "christos.chatzifountas@outlook.com", FetchEmail: "christos.chatzifountas@outlook.com"},
+		{ID: "y", Email: "christos.chatzifountas@yahoo.gr", FetchEmail: "christos.chatzifountas@yahoo.gr"},
+		{ID: "g", Email: "gavlooth@gmail.com", FetchEmail: "gavlooth@gmail.com"},
+		{ID: "w", Email: "christos.chatzifountas@biotz.io", FetchEmail: "christos.chatzifountas@biotz.io"},
+	}
+	inbox := NewInbox(nil, accounts)
+	inbox.SetSize(90, 30)
+	tabs := inbox.renderedTabs()
+	total := 0
+	for _, tab := range tabs {
+		total += lipgloss.Width(tab)
+	}
+	if total > 90 {
+		t.Fatalf("tab bar is %d columns wide in a 90-column inbox", total)
+	}
+	if label := ansi.Strip(tabs[len(tabs)-1]); !strings.Contains(label, "@biotz.io") {
+		t.Fatalf("shortened tab lost its domain: %q", label)
+	}
+	inbox.Update(tea.MouseClickMsg{X: total - 3, Y: 0, Button: tea.MouseLeft})
+	if got := inbox.GetCurrentAccountID(); got != "w" {
+		t.Fatalf("clicking the last tab selected account %q, want w", got)
 	}
 }

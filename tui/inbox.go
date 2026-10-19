@@ -977,14 +977,7 @@ func (m *Inbox) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 			}
 			return m, nil
 		}
-		// tabBarH: 5 rows if multiple accounts (text+PaddingBottom+BorderBottom+MarginBottom+\n), else 0
-		// list header: 3 rows (title row + status row + 1 padding row)
-		tabBarH := 0
-		if len(m.tabs) > 1 {
-			tabBarH = 5
-		}
-		listContentStartY := tabBarH + 3
-		cursorInPage := msg.Y - listContentStartY
+		cursorInPage := msg.Y - m.emailRowsTop()
 		if cursorInPage >= 0 {
 			idx := m.list.Paginator.Page*m.list.Paginator.PerPage + cursorInPage
 			if idx >= 0 && idx < len(m.list.Items()) {
@@ -1429,6 +1422,26 @@ func (m *Inbox) resizeList() {
 	}
 }
 
+// emailRowsTop returns the row of the first email in View: below the tab bar
+// and whatever title and status rows the list draws above its items.
+func (m *Inbox) emailRowsTop() int {
+	top := 0
+	if isUIVisible("header") && len(m.tabs) > 1 {
+		top += lipgloss.Height(tabBarStyle.Render("ALL"))
+	}
+	switch {
+	case m.list.ShowTitle() || m.list.FilterState() == list.Filtering:
+		top += lipgloss.Height(m.list.Styles.TitleBar.Render(" "))
+	case m.list.ShowFilter() && m.list.FilteringEnabled():
+		// With the title hidden the list still draws an empty title row.
+		top++
+	}
+	if m.list.ShowStatusBar() {
+		top += lipgloss.Height(m.list.Styles.StatusBar.Render(" "))
+	}
+	return top
+}
+
 // switchToTab shows the emails of the account tab at index and leaves
 // visual mode, since the selected emails may not be on the new tab.
 func (m *Inbox) switchToTab(index int) tea.Cmd {
@@ -1442,13 +1455,38 @@ func (m *Inbox) switchToTab(index int) tea.Cmd {
 }
 
 // renderedTabs returns each account tab as drawn in the tab bar, left to right.
+// When the full labels do not fit the inbox width, the longest labels are
+// shortened first so every tab stays on screen and can be clicked.
 func (m *Inbox) renderedTabs() []string {
-	tabViews := make([]string, 0, len(m.tabs))
+	labels := make([]string, len(m.tabs))
 	for i, tab := range m.tabs {
-		label := tab.Label
+		labels[i] = tab.Label
 		if tab.ID == "" {
-			label = "ALL"
+			labels[i] = "ALL"
 		}
+	}
+	if m.width > 0 {
+		padding := tabStyle.GetHorizontalFrameSize()
+		limit := 0
+		for _, label := range labels {
+			limit = max(limit, ansi.StringWidth(label))
+		}
+		fits := func() bool {
+			total := 0
+			for _, label := range labels {
+				total += min(ansi.StringWidth(label), limit) + padding
+			}
+			return total <= m.width
+		}
+		for limit > 3 && !fits() {
+			limit--
+		}
+		for i := range labels {
+			labels[i] = shortenTabLabel(labels[i], limit)
+		}
+	}
+	tabViews := make([]string, 0, len(labels))
+	for i, label := range labels {
 		if i == m.activeTabIndex {
 			tabViews = append(tabViews, activeTabStyle.Render(label))
 		} else {
@@ -1456,6 +1494,22 @@ func (m *Inbox) renderedTabs() []string {
 		}
 	}
 	return tabViews
+}
+
+// shortenTabLabel fits label into width columns. For an email address the
+// domain is kept and the name before "@" is cut, since the domain is what
+// tells accounts apart ("christos.ch…@outlook.com").
+func shortenTabLabel(label string, width int) string {
+	if ansi.StringWidth(label) <= width {
+		return label
+	}
+	if at := strings.LastIndex(label, "@"); at > 0 {
+		domain := label[at:]
+		if nameWidth := width - ansi.StringWidth(domain); nameWidth >= 2 {
+			return ansi.Truncate(label[:at], nameWidth, "…") + domain
+		}
+	}
+	return ansi.Truncate(label, width, "…")
 }
 
 // tabAt returns the index of the account tab drawn at column x of the tab

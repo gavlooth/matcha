@@ -628,6 +628,9 @@ type FolderEmailsFetchedMsg struct {
 	Emails     []fetcher.Email
 	AccountID  string
 	FolderName string
+	// FailedAccounts maps the ID of each account that could not be fetched
+	// (after one retry) to the error text. Their emails are absent from Emails.
+	FailedAccounts map[string]string
 }
 
 // FolderEmailsAppendedMsg signals that more emails from a folder have been fetched (pagination).

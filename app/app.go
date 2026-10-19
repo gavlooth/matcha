@@ -704,6 +704,38 @@ func (m *Model) refreshFolderEmails(folderName string) tea.Cmd {
 	return m.fetchFolderEmailsCmd(folderName)
 }
 
+// keepEmailsOfFailedAccounts adds the last known emails of accounts that could
+// not be fetched, so a failed fetch does not empty their part of the folder.
+func (m *Model) keepEmailsOfFailedAccounts(folderName string, fetched []fetcher.Email, failed map[string]string) []fetcher.Email {
+	if len(failed) == 0 {
+		return fetched
+	}
+	previous, ok := m.store.FolderEmails[folderName]
+	if !ok {
+		previous = emailstore.LoadFolderEmailsFromCache(folderName)
+	}
+	merged := slices.Clone(fetched)
+	for _, email := range previous {
+		if _, accountFailed := failed[email.AccountID]; accountFailed {
+			merged = append(merged, email)
+		}
+	}
+	sort.SliceStable(merged, func(i, j int) bool { return merged[i].Date.After(merged[j].Date) })
+	return merged
+}
+
+// folderLoadFailureMessage names the accounts whose folder fetch failed.
+func (m *Model) folderLoadFailureMessage(folderName string, failed map[string]string) string {
+	var parts []string
+	for _, acc := range m.config.Accounts {
+		if errText, ok := failed[acc.ID]; ok {
+			parts = append(parts, fmt.Sprintf("%s: %s", acc.Email, errText))
+		}
+	}
+	return fmt.Sprintf("Could not load %s from %s. Press %s to retry.",
+		folderName, strings.Join(parts, "; "), config.Keybinds.Inbox.Refresh)
+}
+
 func (m *Model) fetchCurrentFolderEmails(folderName string) tea.Cmd {
 	if cached, ok := m.store.FolderEmails[folderName]; ok {
 		m.setFolderInboxEmails(folderName, cached)
@@ -1309,13 +1341,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 				m.plugins.CallHook(plugin.HookEmailReceived, t)
 			}
 		}
-		m.store.FolderEmails[msg.FolderName] = msg.Emails
-		m.cacheFolderEmailBodies(msg.FolderName, msg.Emails)
+		emails := m.keepEmailsOfFailedAccounts(msg.FolderName, msg.Emails, msg.FailedAccounts)
+		m.store.FolderEmails[msg.FolderName] = emails
+		m.cacheFolderEmailBodies(msg.FolderName, emails)
 		if m.folderInbox.GetCurrentFolder() != msg.FolderName {
 			return m, nil
 		}
-		m.setFolderInboxEmails(msg.FolderName, msg.Emails)
-		return m, tea.Batch(append(m.pluginFlagCmds(), m.pluginNotifyCmd(), m.folderInbox.ContinueUnreadFetch())...)
+		m.setFolderInboxEmails(msg.FolderName, emails)
+		// The FolderInbox never sees this message, so end the "r" refresh here.
+		m.folderInbox.SetRefreshing(false)
+		m.folderInbox.GetInbox().SetFailedAccounts(msg.FolderName, msg.FailedAccounts)
+		cmds := append(m.pluginFlagCmds(), m.pluginNotifyCmd(), m.folderInbox.ContinueUnreadFetch())
+		if len(msg.FailedAccounts) > 0 {
+			cmds = append(cmds, m.showErrorCmd(m.folderLoadFailureMessage(msg.FolderName, msg.FailedAccounts)))
+		}
+		return m, tea.Batch(cmds...)
 
 	case tui.FetchFolderMoreEmailsMsg:
 		if msg.AccountID == "" || m.config == nil || m.folderInbox == nil || m.folderInbox.GetCurrentFolder() != msg.FolderName {

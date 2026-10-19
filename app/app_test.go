@@ -2,9 +2,12 @@ package app
 
 import (
 	"errors"
+	"slices"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/floatpane/matcha/config"
 	"github.com/floatpane/matcha/fetcher"
 	"github.com/floatpane/matcha/internal/emailactions"
@@ -90,6 +93,55 @@ func TestUnreadInitialFolderFetchRequestsOlderPage(t *testing.T) {
 	}
 	if !found || fetch.FolderName != "INBOX" || fetch.AccountID != "a" || fetch.Offset != 1 {
 		t.Fatalf("initial folder fetch follow-up = %#v (found %t), want older INBOX page", fetch, found)
+	}
+}
+
+func TestFolderFetchFailureKeepsAccountEmailsAndSaysSo(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	accounts := []config.Account{
+		{ID: "a", Email: "a@example.com", FetchEmail: "a@example.com"},
+		{ID: "b", Email: "b@example.com", FetchEmail: "b@example.com"},
+	}
+	cfg := &config.Config{Accounts: accounts}
+	store := emailstore.NewStore()
+	store.FolderEmails["INBOX"] = []fetcher.Email{
+		{UID: 1, AccountID: "a", Subject: "old a"},
+		{UID: 2, AccountID: "b", Subject: "old b"},
+	}
+	folders := tui.NewFolderInbox([]string{"INBOX"}, accounts)
+	folders.Update(tea.WindowSizeMsg{Width: 400, Height: 40})
+	m := &Model{
+		current: folders, config: cfg, store: store, folderInbox: folders,
+		palette: palette.New(), pluginBridge: pluginbridge.NewManager(nil, store, cfg, folders),
+	}
+	title := func() string { return ansi.Strip(folders.GetInbox().View().Content) }
+
+	m.Update(tui.FolderEmailsFetchedMsg{
+		FolderName:     "INBOX",
+		Emails:         []fetcher.Email{{UID: 3, AccountID: "a", Subject: "new a"}},
+		FailedAccounts: map[string]string{"b": "connection reset"},
+	})
+	subjects := make([]string, 0, len(store.FolderEmails["INBOX"]))
+	for _, email := range store.FolderEmails["INBOX"] {
+		subjects = append(subjects, email.Subject)
+	}
+	if !slices.Contains(subjects, "old b") || !slices.Contains(subjects, "new a") || slices.Contains(subjects, "old a") {
+		t.Fatalf("folder after failed fetch = %v, want new a plus the last known b", subjects)
+	}
+	if !strings.Contains(title(), "could not load b@example.com") {
+		t.Fatalf("inbox does not say which account failed:\n%s", title())
+	}
+
+	m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+	if !strings.Contains(title(), "refreshing") {
+		t.Fatalf("pressing r did not start a refresh:\n%s", title())
+	}
+	m.Update(tui.FolderEmailsFetchedMsg{
+		FolderName: "INBOX",
+		Emails:     []fetcher.Email{{UID: 3, AccountID: "a"}, {UID: 4, AccountID: "b"}},
+	})
+	if strings.Contains(title(), "could not load") || strings.Contains(title(), "refreshing") {
+		t.Fatalf("successful refresh kept the failure note or the refreshing marker:\n%s", title())
 	}
 }
 

@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 	"sort"
 	"sync"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/floatpane/matcha/backend"
@@ -183,10 +185,17 @@ func FetchFoldersCmd(cfg *config.Config) tea.Cmd {
 	}
 }
 
+// folderFetchRetryDelay is how long a failed account waits before its one retry.
+var folderFetchRetryDelay = 2 * time.Second
+
 // FetchFolderEmailsCmd fetches the first page of a folder across all accounts.
+// An account whose fetch fails is retried once; if it fails again it is listed
+// in FailedAccounts so the inbox can say so instead of showing it as empty.
+// Accounts whose cached folder list lacks the folder are not reported.
 func FetchFolderEmailsCmd(cfg *config.Config, folderName string, limit uint32) tea.Cmd {
 	return func() tea.Msg {
 		emailsByAccount := make(map[string][]fetcher.Email)
+		failedAccounts := make(map[string]string)
 		var mu sync.Mutex
 		var wg sync.WaitGroup
 
@@ -194,13 +203,24 @@ func FetchFolderEmailsCmd(cfg *config.Config, folderName string, limit uint32) t
 			wg.Add(1)
 			go func(acc config.Account) {
 				defer wg.Done()
+				// Accounts known to lack the folder fail as expected: no retry, no report.
+				folders, _ := config.GetCachedFolders(acc.ID)
+				expectedToHaveFolder := len(folders) == 0 || slices.Contains(folders, folderName)
 				emails, err := fetcher.FetchFolderEmails(&acc, folderName, limit, 0)
-				if err != nil {
-					return
+				if err != nil && expectedToHaveFolder {
+					time.Sleep(folderFetchRetryDelay)
+					emails, err = fetcher.FetchFolderEmails(&acc, folderName, limit, 0)
 				}
 				mu.Lock()
+				defer mu.Unlock()
+				if err != nil {
+					if expectedToHaveFolder {
+						log.Printf("Fetching %s from %s failed: %v", folderName, acc.Email, err)
+						failedAccounts[acc.ID] = err.Error()
+					}
+					return
+				}
 				emailsByAccount[acc.ID] = emails
-				mu.Unlock()
 			}(account)
 		}
 
@@ -210,18 +230,12 @@ func FetchFolderEmailsCmd(cfg *config.Config, folderName string, limit uint32) t
 		for _, emails := range emailsByAccount {
 			allEmails = append(allEmails, emails...)
 		}
-
-		for i := 0; i < len(allEmails); i++ {
-			for j := i + 1; j < len(allEmails); j++ {
-				if allEmails[j].Date.After(allEmails[i].Date) {
-					allEmails[i], allEmails[j] = allEmails[j], allEmails[i]
-				}
-			}
-		}
+		sort.SliceStable(allEmails, func(i, j int) bool { return allEmails[i].Date.After(allEmails[j].Date) })
 
 		return tui.FolderEmailsFetchedMsg{
-			Emails:     allEmails,
-			FolderName: folderName,
+			Emails:         allEmails,
+			FolderName:     folderName,
+			FailedAccounts: failedAccounts,
 		}
 	}
 }

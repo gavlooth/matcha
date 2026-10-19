@@ -11,6 +11,7 @@ import (
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	threading "github.com/floatpane/jwz-go"
 	"github.com/floatpane/matcha/config"
 	"github.com/floatpane/matcha/fetcher"
@@ -336,17 +337,21 @@ type Inbox struct {
 	noMoreByAccount    map[string]bool // Per-account: true when pagination returns 0 results
 	extraShortHelpKeys []key.Binding
 	pluginStatus       string // Persistent status text set by plugins
-	pluginKeyBindings  []PluginKeyBinding
-	searchOverlay      *SearchOverlay
-	searchActive       bool
-	searchQuery        string
-	searchResults      []fetcher.Email
-	unreadOnly         bool
-	nextUnreadAccount  int
-	threaded           map[string]bool
-	expanded           map[string]bool
-	defaultThreaded    bool
-	paginationPageSize config.PaginationPageSize
+	// failedAccountsFolder and failedAccounts record which accounts could not
+	// be fetched for that folder (account ID → error text).
+	failedAccountsFolder string
+	failedAccounts       map[string]string
+	pluginKeyBindings    []PluginKeyBinding
+	searchOverlay        *SearchOverlay
+	searchActive         bool
+	searchQuery          string
+	searchResults        []fetcher.Email
+	unreadOnly           bool
+	nextUnreadAccount    int
+	threaded             map[string]bool
+	expanded             map[string]bool
+	defaultThreaded      bool
+	paginationPageSize   config.PaginationPageSize
 
 	// Visual mode state (Vim-style multi-select)
 	visualMode     bool              // Whether visual mode is active
@@ -818,7 +823,41 @@ func (m *Inbox) getTitle() string {
 	if m.pluginStatus != "" {
 		title += " (" + m.pluginStatus + ")"
 	}
+	if failure := m.loadFailureNote(); failure != "" {
+		title += " (" + failure + ")"
+	}
 	return title
+}
+
+// SetFailedAccounts records the accounts whose emails could not be fetched for
+// folderName, replacing any earlier record. An empty map clears it.
+func (m *Inbox) SetFailedAccounts(folderName string, failed map[string]string) {
+	m.failedAccountsFolder = folderName
+	m.failedAccounts = failed
+	m.list.Title = m.getTitle()
+}
+
+// loadFailureNote describes accounts that failed to load for the shown folder
+// and tab, or returns "" when there are none.
+func (m *Inbox) loadFailureNote() string {
+	if len(m.failedAccounts) == 0 || m.failedAccountsFolder != m.folderName || m.searchActive {
+		return ""
+	}
+	retry := "press " + config.Keybinds.Inbox.Refresh + " to retry"
+	if m.currentAccountID != "" {
+		errText, failed := m.failedAccounts[m.currentAccountID]
+		if !failed {
+			return ""
+		}
+		return fmt.Sprintf("could not load: %s; %s", ansi.Truncate(errText, 60, "…"), retry)
+	}
+	var names []string
+	for _, acc := range m.accounts {
+		if _, failed := m.failedAccounts[acc.ID]; failed {
+			names = append(names, accountDisplayEmail(acc))
+		}
+	}
+	return fmt.Sprintf("could not load %s; %s", strings.Join(names, ", "), retry)
 }
 
 func (m *Inbox) getBaseTitle() string {

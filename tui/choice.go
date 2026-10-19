@@ -67,18 +67,49 @@ func (m Choice) Init() tea.Cmd {
 	return nil
 }
 
+// computeMenuStartY returns the screen row of the first menu item: the
+// docStyle top margin plus every line of the header drawn above the items.
 func (m Choice) computeMenuStartY() int {
-	y := 1 // docStyle top margin (Margin(1, 2))
-	y += 6 // choiceLogo: blank line + 5 ascii art lines (trailing \n doesn't add a visible row)
+	return docStyle.GetMarginTop() + strings.Count(m.menuHeader(), "\n")
+}
+
+// menuHeader renders everything above the menu items: logo, keybind
+// warnings, the question and any update notice. It ends with a newline.
+func (m Choice) menuHeader() string {
+	var b strings.Builder
+
+	// renderLogo checks the plugin banner override (set via
+	// matcha.ui.set_banner) and falls back to the default choiceLogo.
+	b.WriteString(renderLogo(choiceLogo))
+	b.WriteString("\n")
+
 	if len(m.keybindWarnings) > 0 {
-		y += len(m.keybindWarnings) + 1 // one row per warning + trailing \n
+		warnStyle := lipgloss.NewStyle().Foreground(theme.ActiveTheme.Warning).Padding(0, 1)
+		for _, w := range m.keybindWarnings {
+			b.WriteString(warnStyle.Render("⚠ keybind " + w))
+			b.WriteString("\n")
+		}
+		b.WriteString("\n")
 	}
-	// listHeader with PaddingBottom(1) = 2 rows, then \n\n = 2 more rows
-	y += 4
+
+	b.WriteString(listHeader.Render(t("choice.what_to_do")))
+	b.WriteString("\n\n")
+
+	// If we detected an update, show a short message under the header.
 	if m.UpdateAvailable {
-		y += 3 // update message (1 row) + \n\n (2 rows)
+		updateStyle := lipgloss.NewStyle().Foreground(theme.ActiveTheme.Warning).Padding(0, 1)
+		cur := m.CurrentVersion
+		if cur == "" {
+			cur = t("choice.unknown")
+		}
+		msg := tpl("choice.update_available", map[string]interface{}{
+			"latest":  m.LatestVersion,
+			"current": cur,
+		})
+		b.WriteString(updateStyle.Render(msg))
+		b.WriteString("\n\n")
 	}
-	return y
+	return b.String()
 }
 
 func (m Choice) handleSelect() (tea.Model, tea.Cmd) {
@@ -172,38 +203,7 @@ func (m Choice) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Choice) View() tea.View {
 	var b strings.Builder
-
-	// renderLogo checks the plugin banner override (set via
-	// matcha.ui.set_banner) and falls back to the default choiceLogo.
-	b.WriteString(renderLogo(choiceLogo))
-	b.WriteString("\n")
-
-	if len(m.keybindWarnings) > 0 {
-		warnStyle := lipgloss.NewStyle().Foreground(theme.ActiveTheme.Warning).Padding(0, 1)
-		for _, w := range m.keybindWarnings {
-			b.WriteString(warnStyle.Render("⚠ keybind " + w))
-			b.WriteString("\n")
-		}
-		b.WriteString("\n")
-	}
-
-	b.WriteString(listHeader.Render(t("choice.what_to_do")))
-	b.WriteString("\n\n")
-
-	// If we detected an update, show a short message under the header.
-	if m.UpdateAvailable {
-		updateStyle := lipgloss.NewStyle().Foreground(theme.ActiveTheme.Warning).Padding(0, 1)
-		cur := m.CurrentVersion
-		if cur == "" {
-			cur = t("choice.unknown")
-		}
-		msg := tpl("choice.update_available", map[string]interface{}{
-			"latest":  m.LatestVersion,
-			"current": cur,
-		})
-		b.WriteString(updateStyle.Render(msg))
-		b.WriteString("\n\n")
-	}
+	b.WriteString(m.menuHeader())
 
 	for i, choice := range m.choices {
 		if m.cursor == i {

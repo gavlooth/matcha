@@ -76,7 +76,7 @@ Sarah</p>
 		},
 	}
 
-	ev := tui.NewEmailView(email, 0, 140, 45, tui.MailboxInbox, true)
+	ev := tui.NewEmailView(email, 140, 45, tui.MailboxInbox, true)
 
 	p := tea.NewProgram(ev)
 	if _, err := p.Run(); err != nil {

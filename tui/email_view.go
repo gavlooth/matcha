@@ -63,7 +63,6 @@ func applyBodyTransform(body string, email fetcher.Email) string {
 type EmailView struct {
 	viewport            viewport.Model
 	email               fetcher.Email
-	emailIndex          int
 	attachmentCursor    int
 	focusOnAttachments  bool
 	accountID           string
@@ -94,7 +93,7 @@ type EmailView struct {
 	patchInfo           *view.PatchInfo
 }
 
-func NewEmailView(email fetcher.Email, emailIndex, width, height int, mailbox MailboxKind, disableImages bool) *EmailView {
+func NewEmailView(email fetcher.Email, width, height int, mailbox MailboxKind, disableImages bool) *EmailView {
 	isSMIME := false
 	smimeTrusted := false
 	isEncrypted := false
@@ -195,7 +194,6 @@ func NewEmailView(email fetcher.Email, emailIndex, width, height int, mailbox Ma
 	return &EmailView{
 		viewport:          vp,
 		email:             email,
-		emailIndex:        emailIndex,
 		accountID:         email.AccountID,
 		mailbox:           mailbox,
 		disableImages:     disableImages,
@@ -220,7 +218,7 @@ func NewEmailView(email fetcher.Email, emailIndex, width, height int, mailbox Ma
 // offsets for out-of-band image rendering. rowOffset is non-zero in vertical
 // split layouts where the preview sits below the inbox pane.
 func NewEmailViewPreview(email fetcher.Email, width, height, colOffset, rowOffset int, disableImages bool) *EmailView {
-	ev := NewEmailView(email, 0, width, height, MailboxInbox, disableImages)
+	ev := NewEmailView(email, width, height, MailboxInbox, disableImages)
 	ev.isPreviewMode = true
 	ev.columnOffset = colOffset
 	ev.rowOffset = rowOffset
@@ -337,17 +335,18 @@ func (m *EmailView) handleAttachmentFocusKey(msg tea.KeyPressMsg) (bool, func() 
 	case keyEnter:
 		if len(m.email.Attachments) > 0 {
 			selected := m.email.Attachments[m.attachmentCursor]
-			idx := m.emailIndex
+			uid := m.email.UID
 			accountID := m.accountID
 			mailbox := m.mailbox
 			return true, func() (tea.Model, tea.Cmd) {
 				return m, func() tea.Msg {
 					return DownloadAttachmentMsg{
-						Index:     idx,
+						UID:       uid,
 						Filename:  selected.Filename,
 						PartID:    selected.PartID,
 						Data:      selected.Data,
 						AccountID: accountID,
+						Encoding:  selected.Encoding,
 						Mailbox:   mailbox,
 					}
 				}

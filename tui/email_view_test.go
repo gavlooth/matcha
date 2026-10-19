@@ -15,7 +15,7 @@ import (
 func TestRemoteImagePermissionIsPerMessageView(t *testing.T) {
 	t.Setenv("TERM", "xterm-kitty")
 	email := fetcher.Email{Body: "hello", BodyMIMEType: "text/plain"}
-	first := NewEmailView(email, 0, 80, 24, MailboxInbox, true)
+	first := NewEmailView(email, 80, 24, MailboxInbox, true)
 	if first.showImages || first.showRemoteImages {
 		t.Fatal("image display and remote loading should start disabled")
 	}
@@ -31,7 +31,7 @@ func TestRemoteImagePermissionIsPerMessageView(t *testing.T) {
 	if !first.showRemoteImages {
 		t.Fatal("resizing should retain this message's permission")
 	}
-	second := NewEmailView(email, 1, 80, 24, MailboxInbox, false)
+	second := NewEmailView(email, 80, 24, MailboxInbox, false)
 	if second.showRemoteImages {
 		t.Fatal("remote-image permission leaked to another message view")
 	}
@@ -52,7 +52,7 @@ func TestRemoteImageLoadingRunsOnlyInCommandAndIsReused(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 	email := fetcher.Email{Body: `<img src="` + server.URL + `/test.png" alt="remote">`, BodyMIMEType: "text/html"}
-	first := NewEmailView(email, 0, 80, 24, MailboxInbox, false)
+	first := NewEmailView(email, 80, 24, MailboxInbox, false)
 	_, cmd := first.Update(tea.KeyPressMsg{Code: 'I', Text: "I"})
 	if cmd == nil || requests.Load() != 0 {
 		t.Fatalf("key press made %d requests or returned no command", requests.Load())
@@ -75,7 +75,7 @@ func TestRemoteImageLoadingRunsOnlyInCommandAndIsReused(t *testing.T) {
 	if requests.Load() != 0 {
 		t.Fatalf("image toggle fetched a local image: %d requests", requests.Load())
 	}
-	second := NewEmailView(email, 1, 80, 24, MailboxInbox, false)
+	second := NewEmailView(email, 80, 24, MailboxInbox, false)
 	second.Update(result)
 	if second.showRemoteImages {
 		t.Fatal("stale remote image result affected a different view")
@@ -84,7 +84,7 @@ func TestRemoteImageLoadingRunsOnlyInCommandAndIsReused(t *testing.T) {
 
 func TestRemoteImageResultReachesNestedViews(t *testing.T) {
 	email := fetcher.Email{Body: "original", BodyMIMEType: "text/plain"}
-	preview := NewEmailView(email, 0, 80, 24, MailboxInbox, false)
+	preview := NewEmailView(email, 80, 24, MailboxInbox, false)
 	preview.remoteImagesLoading = true
 	preview.remoteLoadID = 42
 	folder := &FolderInbox{previewPane: preview, movingEmail: true}
@@ -93,7 +93,7 @@ func TestRemoteImageResultReachesNestedViews(t *testing.T) {
 		t.Fatal("folder preview did not receive the remote image result")
 	}
 
-	replyEmail := NewEmailView(email, 0, 80, 24, MailboxInbox, false)
+	replyEmail := NewEmailView(email, 80, 24, MailboxInbox, false)
 	replyEmail.remoteImagesLoading = true
 	replyEmail.remoteLoadID = 43
 	reply := &ReplySplitView{emailView: replyEmail, focusComposer: true}
@@ -105,13 +105,14 @@ func TestRemoteImageResultReachesNestedViews(t *testing.T) {
 
 func TestEmailViewUpdate(t *testing.T) {
 	emailWithAttachments := fetcher.Email{
+		UID:     4242,
 		From:    "test@example.com",
 		Subject: "Test Email with Attachments",
 		Body:    "This is the body.",
 		Date:    time.Now(),
 		Attachments: []fetcher.Attachment{
 			{Filename: "attachment1.txt", Data: []byte("attachment1")},
-			{Filename: "attachment2.txt", Data: []byte("attachment2")},
+			{Filename: "attachment2.txt", Data: []byte("attachment2"), Encoding: "base64"},
 		},
 	}
 
@@ -123,7 +124,7 @@ func TestEmailViewUpdate(t *testing.T) {
 	}
 
 	t.Run("Focus on attachments", func(t *testing.T) {
-		emailView := NewEmailView(emailWithAttachments, 0, 80, 24, MailboxInbox, false)
+		emailView := NewEmailView(emailWithAttachments, 80, 24, MailboxInbox, false)
 		if emailView.focusOnAttachments {
 			t.Error("focusOnAttachments should be initially false")
 		}
@@ -145,7 +146,7 @@ func TestEmailViewUpdate(t *testing.T) {
 	})
 
 	t.Run("No focus on attachments when there are none", func(t *testing.T) {
-		emailView := NewEmailView(emailWithoutAttachments, 0, 80, 24, MailboxInbox, false)
+		emailView := NewEmailView(emailWithoutAttachments, 80, 24, MailboxInbox, false)
 		if emailView.focusOnAttachments {
 			t.Error("focusOnAttachments should be initially false")
 		}
@@ -158,7 +159,7 @@ func TestEmailViewUpdate(t *testing.T) {
 	})
 
 	t.Run("Navigate attachments", func(t *testing.T) {
-		emailView := NewEmailView(emailWithAttachments, 0, 80, 24, MailboxInbox, false)
+		emailView := NewEmailView(emailWithAttachments, 80, 24, MailboxInbox, false)
 		// Focus on attachments
 		model, _ := emailView.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 		emailView = model.(*EmailView)
@@ -190,7 +191,7 @@ func TestEmailViewUpdate(t *testing.T) {
 	})
 
 	t.Run("Attachment navigation does not scroll body", func(t *testing.T) {
-		emailView := NewEmailView(emailWithAttachments, 0, 80, 24, MailboxInbox, false)
+		emailView := NewEmailView(emailWithAttachments, 80, 24, MailboxInbox, false)
 		emailView.viewport.SetHeight(2)
 		emailView.viewport.SetContent("line 1\nline 2\nline 3\nline 4\nline 5\n")
 		emailView.viewport.SetYOffset(1)
@@ -210,7 +211,7 @@ func TestEmailViewUpdate(t *testing.T) {
 	})
 
 	t.Run("Download attachment", func(t *testing.T) {
-		emailView := NewEmailView(emailWithAttachments, 0, 80, 24, MailboxInbox, false)
+		emailView := NewEmailView(emailWithAttachments, 80, 24, MailboxInbox, false)
 		// Focus on attachments
 		model, _ := emailView.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 		emailView = model.(*EmailView)
@@ -233,13 +234,18 @@ func TestEmailViewUpdate(t *testing.T) {
 		if downloadMsg.Filename != "attachment2.txt" {
 			t.Errorf("Expected to download 'attachment2.txt', but got '%s'", downloadMsg.Filename)
 		}
+		// The email is named by UID, not by its position in a list that a
+		// refresh can reorder while the email is open.
+		if downloadMsg.UID != 4242 || downloadMsg.Encoding != "base64" {
+			t.Errorf("download request names UID %d with encoding %q, want 4242 and base64", downloadMsg.UID, downloadMsg.Encoding)
+		}
 		if downloadMsg.Mailbox != MailboxInbox {
 			t.Errorf("Expected mailbox to be MailboxInbox, got %s", downloadMsg.Mailbox)
 		}
 	})
 
 	t.Run("Reply to email", func(t *testing.T) {
-		emailView := NewEmailView(emailWithAttachments, 0, 80, 24, MailboxInbox, false)
+		emailView := NewEmailView(emailWithAttachments, 80, 24, MailboxInbox, false)
 
 		_, cmd := emailView.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 		if cmd == nil {

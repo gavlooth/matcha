@@ -350,14 +350,17 @@ type BatchEmailActionDoneMsg struct {
 
 type GoToChoiceMenuMsg struct{}
 
+// DownloadAttachmentMsg asks to save one attachment of the email with UID.
+// Folder names the IMAP folder holding the email; when empty, Mailbox decides.
 type DownloadAttachmentMsg struct {
-	Index     int
+	UID       uint32
 	Filename  string
 	PartID    string
 	Data      []byte
 	AccountID string
 	Encoding  string
 	Mailbox   MailboxKind
+	Folder    string
 }
 
 type AttachmentDownloadedMsg struct {

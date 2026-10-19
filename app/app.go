@@ -1672,8 +1672,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 			if inbox := m.folderInbox.GetInbox(); inbox != nil {
 				mailbox = inbox.GetMailbox()
 			}
-			emailIndex := m.store.GetEmailIndex(email.UID, email.AccountID)
-			emailView := tui.NewEmailView(email, emailIndex, m.width, m.height, mailbox, m.config.DisableImages)
+			emailView := tui.NewEmailView(email, m.width, m.height, mailbox, m.config.DisableImages)
 			m.current = emailView
 			m.syncPluginStatus()
 			m.syncPluginKeyBindings()
@@ -1972,8 +1971,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 		if !email.IsRead && !pluginSuppressed {
 			markReadCmd = m.markEmailReadAndQueue(msg.AccountID, msg.UID, false)
 		}
-		emailIndex := m.store.GetEmailIndex(msg.UID, msg.AccountID)
-		emailView := tui.NewEmailView(*email, emailIndex, m.width, m.height, msg.Mailbox, m.config.DisableImages)
+		emailView := tui.NewEmailView(*email, m.width, m.height, msg.Mailbox, m.config.DisableImages)
 		m.current = emailView
 		m.syncPluginStatus()
 		m.syncPluginKeyBindings()
@@ -2640,28 +2638,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 			m.current = m.previousModel
 			return m, nil
 		}
-		email := m.store.GetEmailByIndex(msg.Index)
-		if email == nil {
-			m.current = m.previousModel
-			return m, nil
+		// Fetch from the folder the email was read from, as the body fetch does.
+		if m.folderInbox != nil {
+			msg.Folder = m.folderName()
 		}
-		var encoding string
-		for _, att := range email.Attachments {
-			if att.PartID == msg.PartID {
-				encoding = att.Encoding
-				break
-			}
-		}
-		newMsg := tui.DownloadAttachmentMsg{
-			Index:     msg.Index,
-			Filename:  msg.Filename,
-			PartID:    msg.PartID,
-			Data:      msg.Data,
-			AccountID: msg.AccountID,
-			Encoding:  encoding,
-			Mailbox:   msg.Mailbox,
-		}
-		return m, tea.Batch(m.current.Init(), exportcmd.DownloadAttachmentCmd(account, email.UID, newMsg))
+		return m, tea.Batch(m.current.Init(), exportcmd.DownloadAttachmentCmd(account, msg))
 
 	case tui.AttachmentDownloadedMsg:
 		var statusMsg string

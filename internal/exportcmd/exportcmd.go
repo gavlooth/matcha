@@ -72,18 +72,21 @@ func TruncateUTF8(s string, maxBytes int) string {
 
 // DownloadAttachmentCmd downloads an email attachment and saves it to the
 // user's Downloads folder.
-func DownloadAttachmentCmd(account *config.Account, uid uint32, msg tui.DownloadAttachmentMsg) tea.Cmd {
+func DownloadAttachmentCmd(account *config.Account, msg tui.DownloadAttachmentMsg) tea.Cmd {
 	return func() tea.Msg {
 		var data []byte
 		var err error
-		switch msg.Mailbox {
-		case tui.MailboxSent:
+		uid := msg.UID
+		switch {
+		case msg.Folder != "":
+			data, err = fetcher.FetchFolderAttachment(account, msg.Folder, uid, msg.PartID, msg.Encoding)
+		case msg.Mailbox == tui.MailboxSent:
 			data, err = fetcher.FetchSentAttachment(account, uid, msg.PartID, msg.Encoding)
-		case tui.MailboxTrash:
+		case msg.Mailbox == tui.MailboxTrash:
 			data, err = fetcher.FetchTrashAttachment(account, uid, msg.PartID, msg.Encoding)
-		case tui.MailboxArchive:
+		case msg.Mailbox == tui.MailboxArchive:
 			data, err = fetcher.FetchArchiveAttachment(account, uid, msg.PartID, msg.Encoding)
-		case tui.MailboxInbox:
+		default:
 			data, err = fetcher.FetchAttachment(account, uid, msg.PartID, msg.Encoding)
 		}
 

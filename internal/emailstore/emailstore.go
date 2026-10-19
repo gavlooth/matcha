@@ -128,13 +128,6 @@ func (s *Store) RemoveAccount(accountID string) {
 	s.Emails = FlattenAndSort(s.EmailsByAcct)
 }
 
-func (s *Store) GetEmailByIndex(index int) *fetcher.Email {
-	if index >= 0 && index < len(s.Emails) {
-		return &s.Emails[index]
-	}
-	return nil
-}
-
 func (s *Store) GetEmailByUIDAndAccount(uid uint32, accountID string) *fetcher.Email {
 	for i := range s.Emails {
 		if s.Emails[i].UID == uid && s.Emails[i].AccountID == accountID {
@@ -142,15 +135,6 @@ func (s *Store) GetEmailByUIDAndAccount(uid uint32, accountID string) *fetcher.E
 		}
 	}
 	return nil
-}
-
-func (s *Store) GetEmailIndex(uid uint32, accountID string) int {
-	for i := range s.Emails {
-		if s.Emails[i].UID == uid && s.Emails[i].AccountID == accountID {
-			return i
-		}
-	}
-	return -1
 }
 
 func (s *Store) UpdateEmailBodyByUID(uid uint32, accountID string, body, bodyMIMEType string, attachments []fetcher.Attachment) {

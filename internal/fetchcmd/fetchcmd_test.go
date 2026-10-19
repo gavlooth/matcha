@@ -30,3 +30,23 @@ func TestFetchFolderEmailsCmdUsesPageLimit(t *testing.T) {
 		t.Fatalf("first page = %#v, want two messages", msg)
 	}
 }
+
+func TestFolderPageForAccountWithoutTheFolderIsEmptyNotAnError(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if err := config.SaveFolderCache(&config.FolderCache{Accounts: []config.CachedFolders{
+		{AccountID: "gmail", Folders: []string{"INBOX", "Important to Review"}},
+		{AccountID: "outlook", Folders: []string{"INBOX"}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	// The maildir does not exist, so any real request would fail.
+	outlook := &config.Account{ID: "outlook", Email: "o@example.com", Protocol: "maildir", MaildirPath: "/nonexistent"}
+	msg := FetchFolderEmailsPaginatedCmd(outlook, "Important to Review", 40, 40)()
+	page, ok := msg.(tui.FolderEmailsAppendedMsg)
+	if !ok || page.AccountID != "outlook" || len(page.Emails) != 0 {
+		t.Fatalf("page for an account without the folder = %#v, want an empty page", msg)
+	}
+	if _, failed := FetchFolderEmailsPaginatedCmd(outlook, "INBOX", 40, 40)().(tui.FolderEmailsPageFailedMsg); !failed {
+		t.Fatal("a folder the account has should still be requested and report its failure")
+	}
+}

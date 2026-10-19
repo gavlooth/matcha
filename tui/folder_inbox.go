@@ -954,7 +954,9 @@ func (m *FolderInbox) renderSidebar() string {
 		tab := ansi.Truncate(m.formatFolderName(folder), nameWidth, "…") + suffix
 
 		if i == m.activeFolderIdx {
-			b.WriteString(activeFolderStyle.Width(sidebarWidth - 4).Render(tab))
+			// The style width includes its left and right padding, so the
+			// highlighted row gets the same room for text as the other rows.
+			b.WriteString(activeFolderStyle.Width(sidebarWidth - 4 + activeFolderStyle.GetHorizontalPadding()).Render(tab))
 		} else {
 			b.WriteString(folderStyle.Render(tab))
 		}

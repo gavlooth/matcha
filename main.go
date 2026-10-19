@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"net/url"
 	"os"
@@ -260,6 +261,8 @@ func loadConfigAndSetup() *config.Config {
 
 func setupLogging(showLogPanel bool) (*logging.Buffer, <-chan logging.Entry, *tui.LogPanel) {
 	if !showLogPanel {
+		// Log lines written to the terminal would be drawn over the TUI.
+		redirectLogToFile()
 		return nil, nil, nil
 	}
 
@@ -268,6 +271,29 @@ func setupLogging(showLogPanel bool) (*logging.Buffer, <-chan logging.Entry, *tu
 	logCh := logger.Subscribe()
 	logPanel := tui.NewLogPanel(logger)
 	return logger, logCh, logPanel
+}
+
+// maxLogFileBytes is the size at which matcha.log is moved to matcha.log.1 on startup.
+const maxLogFileBytes = 1 << 20
+
+// redirectLogToFile sends log output to ~/.cache/matcha/matcha.log, keeping one
+// older file. If the file cannot be opened, logging is discarded rather than
+// written over the TUI.
+func redirectLogToFile() {
+	path := ""
+	if dir, err := config.GetCacheDir(); err == nil && os.MkdirAll(dir, 0o700) == nil {
+		path = filepath.Join(dir, "matcha.log")
+		if info, err := os.Stat(path); err == nil && info.Size() > maxLogFileBytes {
+			_ = os.Rename(path, path+".1")
+		}
+	}
+	if path != "" {
+		if f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600); err == nil {
+			log.SetOutput(f)
+			return
+		}
+	}
+	log.SetOutput(io.Discard)
 }
 
 func setupPlugins(cfg *config.Config) *plugin.Manager {
@@ -368,7 +394,7 @@ Commands:
 Flags:
   --debug          Enable debug logging
   --verbose, -V    Enable verbose logging
-  --logs           Show the in-app log panel
+  --logs           Show the in-app log panel (otherwise logs go to ~/.cache/matcha/matcha.log)
   -h, --help       Show this help
   -v, --version    Print version information
 

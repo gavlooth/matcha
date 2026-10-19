@@ -101,6 +101,23 @@ func TestFolderSidebarClickSelectsRenderedFolder(t *testing.T) {
 	}
 }
 
+func TestSelectedFolderWithUnreadCountStaysOnOneRow(t *testing.T) {
+	folders := []string{"INBOX", "Important to Review", "Sent"}
+	fi := NewFolderInbox(folders, []config.Account{{ID: "a", Name: "Account"}})
+	fi.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	fi.unread = map[string]int{"Important to Review": 8}
+	fi.activeFolderIdx = 1
+	for _, row := range strings.Split(ansi.Strip(fi.renderSidebar()), "\n") {
+		if strings.Contains(row, "Important") {
+			if !strings.Contains(row, "(8)") {
+				t.Fatalf("selected folder's unread count wrapped off its row: %q", row)
+			}
+			return
+		}
+	}
+	t.Fatal("selected folder not rendered")
+}
+
 func TestFolderPaginationFailureClearsOnlyActiveFolder(t *testing.T) {
 	const folder = "UnreadTestFolder"
 	accounts := []config.Account{{ID: "a", FetchEmail: "a@example.com"}}

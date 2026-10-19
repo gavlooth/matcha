@@ -185,6 +185,13 @@ func FetchFoldersCmd(cfg *config.Config) tea.Cmd {
 	}
 }
 
+// AccountMayHaveFolder reports whether the account's cached folder list
+// contains folderName. Without a cached list it assumes the folder exists.
+func AccountMayHaveFolder(accountID, folderName string) bool {
+	folders, _ := config.GetCachedFolders(accountID)
+	return len(folders) == 0 || slices.Contains(folders, folderName)
+}
+
 // folderFetchRetryDelay is how long a failed account waits before its one retry.
 var folderFetchRetryDelay = 2 * time.Second
 
@@ -204,8 +211,7 @@ func FetchFolderEmailsCmd(cfg *config.Config, folderName string, limit uint32) t
 			go func(acc config.Account) {
 				defer wg.Done()
 				// Accounts known to lack the folder fail as expected: no retry, no report.
-				folders, _ := config.GetCachedFolders(acc.ID)
-				expectedToHaveFolder := len(folders) == 0 || slices.Contains(folders, folderName)
+				expectedToHaveFolder := AccountMayHaveFolder(acc.ID, folderName)
 				emails, err := fetcher.FetchFolderEmails(&acc, folderName, limit, 0)
 				if err != nil && expectedToHaveFolder {
 					time.Sleep(folderFetchRetryDelay)
@@ -241,8 +247,13 @@ func FetchFolderEmailsCmd(cfg *config.Config, folderName string, limit uint32) t
 }
 
 // FetchFolderEmailsPaginatedCmd fetches the next page of folder emails for a single account.
+// An account whose cached folder list lacks the folder gets an empty page, which
+// marks it as having no more emails, instead of a failing request.
 func FetchFolderEmailsPaginatedCmd(account *config.Account, folderName string, limit, offset uint32) tea.Cmd {
 	return func() tea.Msg {
+		if !AccountMayHaveFolder(account.ID, folderName) {
+			return tui.FolderEmailsAppendedMsg{AccountID: account.ID, FolderName: folderName}
+		}
 		emails, err := fetcher.FetchFolderEmails(account, folderName, limit, offset)
 		if err != nil {
 			return tui.FolderEmailsPageFailedMsg{FolderName: folderName, Err: err}

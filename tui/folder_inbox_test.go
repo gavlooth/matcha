@@ -101,6 +101,42 @@ func TestFolderSidebarClickSelectsRenderedFolder(t *testing.T) {
 	}
 }
 
+func TestClickingAccountTabShowsThatAccount(t *testing.T) {
+	accounts := []config.Account{
+		{ID: "a", FetchEmail: "a@example.com"},
+		{ID: "b", FetchEmail: "b@example.com"},
+	}
+	fi := NewFolderInbox([]string{keyINBOX}, accounts)
+	fi.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	fi.SetFolderData(
+		[]string{keyINBOX, "B only"},
+		map[string]int{},
+		map[string][]string{"a": {keyINBOX}, "b": {keyINBOX, "B only"}},
+		map[string]map[string]int{},
+	)
+	clickLabel := func(label string) {
+		t.Helper()
+		tabRow := strings.Split(ansi.Strip(fi.View().Content), "\n")[0]
+		col := strings.Index(tabRow, label)
+		if col < 0 {
+			t.Fatalf("tab %q not on the first row: %q", label, tabRow)
+		}
+		fi.Update(tea.MouseClickMsg{X: ansi.StringWidth(tabRow[:col]), Y: 0, Button: tea.MouseLeft})
+	}
+
+	clickLabel("b@example.com")
+	if got := fi.inbox.GetCurrentAccountID(); got != "b" {
+		t.Fatalf("clicking the b@example.com tab showed account %q", got)
+	}
+	if !slices.Equal(fi.folders, []string{keyINBOX, "B only"}) {
+		t.Fatalf("sidebar did not follow the clicked tab: %v", fi.folders)
+	}
+	clickLabel("ALL")
+	if got := fi.inbox.GetCurrentAccountID(); got != "" {
+		t.Fatalf("clicking the ALL tab showed account %q", got)
+	}
+}
+
 func TestSelectedFolderWithUnreadCountStaysOnOneRow(t *testing.T) {
 	folders := []string{"INBOX", "Important to Review", "Sent"}
 	fi := NewFolderInbox(folders, []config.Account{{ID: "a", Name: "Account"}})

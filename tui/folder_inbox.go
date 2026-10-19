@@ -344,8 +344,9 @@ func (m *FolderInbox) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocycl
 			}
 			return m, nil
 		}
-		_, cmd := m.inbox.Update(msg)
-		return m, cmd
+		// The inbox starts right of the sidebar; give it its own columns.
+		msg.X -= m.effectiveSidebarWidth()
+		return m.updateInbox(msg)
 
 	case tea.KeyPressMsg:
 		// Don't intercept keys while filtering
@@ -572,10 +573,14 @@ func (m *FolderInbox) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocycl
 		return m, nil
 	}
 
-	// Forward to inbox
-	var cmd tea.Cmd
+	return m.updateInbox(msg)
+}
+
+// updateInbox passes msg to the inbox and, when that switched the account
+// tab, shows the new account's folders.
+func (m *FolderInbox) updateInbox(msg tea.Msg) (tea.Model, tea.Cmd) {
 	previousAccount := m.inbox.GetCurrentAccountID()
-	_, cmd = m.inbox.Update(msg)
+	_, cmd := m.inbox.Update(msg)
 	if currentAccount := m.inbox.GetCurrentAccountID(); currentAccount != previousAccount {
 		m.closeSplitPreview()
 		folderCmd := m.showAccountFolders(currentAccount)
@@ -584,11 +589,9 @@ func (m *FolderInbox) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocycl
 
 	// Intercept FetchMoreEmailsMsg from inbox and convert to folder-aware version
 	if cmd != nil {
-		wrappedCmd := m.wrapInboxCmd(cmd)
-		return m, wrappedCmd
+		return m, m.wrapInboxCmd(cmd)
 	}
-
-	return m, cmd
+	return m, nil
 }
 
 // wrapInboxCmd intercepts messages from the inbox and adds folder context.

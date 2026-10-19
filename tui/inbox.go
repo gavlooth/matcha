@@ -970,6 +970,13 @@ func (m *Inbox) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 		if msg.Button != tea.MouseLeft {
 			return m, nil
 		}
+		// The account tab labels sit on the first row of the inbox.
+		if msg.Y == 0 && isUIVisible("header") && len(m.tabs) > 1 {
+			if i := m.tabAt(msg.X); i >= 0 && i != m.activeTabIndex {
+				return m, m.switchToTab(i)
+			}
+			return m, nil
+		}
 		// tabBarH: 5 rows if multiple accounts (text+PaddingBottom+BorderBottom+MarginBottom+\n), else 0
 		// list header: 3 rows (title row + status row + 1 padding row)
 		tabBarH := 0
@@ -1088,31 +1095,11 @@ func (m *Inbox) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 			}
 		case "left", kb.Inbox.PrevTab:
 			if len(m.tabs) > 1 {
-				m.activeTabIndex--
-				if m.activeTabIndex < 0 {
-					m.activeTabIndex = len(m.tabs) - 1
-				}
-				m.currentAccountID = m.tabs[m.activeTabIndex].ID
-				// Exit visual mode when switching tabs
-				m.visualMode = false
-				m.selectedUIDs = make(map[uint32]string)
-				m.selectionOrder = []uint32{}
-				m.updateList()
-				return m, m.continueUnreadFetch()
+				return m, m.switchToTab((m.activeTabIndex - 1 + len(m.tabs)) % len(m.tabs))
 			}
 		case keyRight, kb.Inbox.NextTab:
 			if len(m.tabs) > 1 {
-				m.activeTabIndex++
-				if m.activeTabIndex >= len(m.tabs) {
-					m.activeTabIndex = 0
-				}
-				m.currentAccountID = m.tabs[m.activeTabIndex].ID
-				// Exit visual mode when switching tabs
-				m.visualMode = false
-				m.selectedUIDs = make(map[uint32]string)
-				m.selectionOrder = []uint32{}
-				m.updateList()
-				return m, m.continueUnreadFetch()
+				return m, m.switchToTab((m.activeTabIndex + 1) % len(m.tabs))
 			}
 		case kb.Inbox.Delete:
 			if m.visualMode && len(m.selectedUIDs) > 0 {
@@ -1442,6 +1429,49 @@ func (m *Inbox) resizeList() {
 	}
 }
 
+// switchToTab shows the emails of the account tab at index and leaves
+// visual mode, since the selected emails may not be on the new tab.
+func (m *Inbox) switchToTab(index int) tea.Cmd {
+	m.activeTabIndex = index
+	m.currentAccountID = m.tabs[index].ID
+	m.visualMode = false
+	m.selectedUIDs = make(map[uint32]string)
+	m.selectionOrder = []uint32{}
+	m.updateList()
+	return m.continueUnreadFetch()
+}
+
+// renderedTabs returns each account tab as drawn in the tab bar, left to right.
+func (m *Inbox) renderedTabs() []string {
+	tabViews := make([]string, 0, len(m.tabs))
+	for i, tab := range m.tabs {
+		label := tab.Label
+		if tab.ID == "" {
+			label = "ALL"
+		}
+		if i == m.activeTabIndex {
+			tabViews = append(tabViews, activeTabStyle.Render(label))
+		} else {
+			tabViews = append(tabViews, tabStyle.Render(label))
+		}
+	}
+	return tabViews
+}
+
+// tabAt returns the index of the account tab drawn at column x of the tab
+// row, or -1 when x is past the last tab.
+func (m *Inbox) tabAt(x int) int {
+	left := 0
+	for i, tab := range m.renderedTabs() {
+		right := left + lipgloss.Width(tab)
+		if x >= left && x < right {
+			return i
+		}
+		left = right
+	}
+	return -1
+}
+
 func (m *Inbox) View() tea.View {
 	m.resizeList()
 	var b strings.Builder
@@ -1452,20 +1482,7 @@ func (m *Inbox) View() tea.View {
 
 	// Render tabs if there are multiple accounts and the header is visible
 	if headerVisible && len(m.tabs) > 1 {
-		var tabViews []string
-		for i, tab := range m.tabs {
-			label := tab.Label
-			if tab.ID == "" {
-				label = "ALL"
-			}
-
-			if i == m.activeTabIndex {
-				tabViews = append(tabViews, activeTabStyle.Render(label))
-			} else {
-				tabViews = append(tabViews, tabStyle.Render(label))
-			}
-		}
-		tabBar := tabBarStyle.Render(lipgloss.JoinHorizontal(lipgloss.Top, tabViews...))
+		tabBar := tabBarStyle.Render(lipgloss.JoinHorizontal(lipgloss.Top, m.renderedTabs()...))
 		b.WriteString(tabBar)
 		b.WriteString("\n")
 	}

@@ -958,10 +958,20 @@ func (m *Inbox) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 
 	switch msg := msg.(type) {
 	case tea.MouseWheelMsg:
+		delta := 0
 		switch msg.Button {
 		case tea.MouseWheelDown:
-			m.list.CursorDown()
+			delta = 1
 		case tea.MouseWheelUp:
+			delta = -1
+		}
+		if m.searchOverlay != nil {
+			m.searchOverlay.MoveHighlight(delta)
+			return m, nil
+		}
+		if delta > 0 {
+			m.list.CursorDown()
+		} else if delta < 0 {
 			m.list.CursorUp()
 		}
 		return m, nil
@@ -969,6 +979,11 @@ func (m *Inbox) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 	case tea.MouseClickMsg:
 		if msg.Button != tea.MouseLeft {
 			return m, nil
+		}
+		// While the search box is open, clicks pick search results and never
+		// move the email list behind it.
+		if m.searchOverlay != nil {
+			return m, m.searchOverlay.Click(msg.Y - m.searchOverlayTop())
 		}
 		// The account tab labels sit on the first row of the inbox.
 		if msg.Y == 0 && isUIVisible("header") && len(m.tabs) > 1 {
@@ -988,16 +1003,7 @@ func (m *Inbox) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 				m.lastClickY = msg.Y
 				if isDoubleClick {
 					if selectedItem, ok := m.list.SelectedItem().(item); ok && selectedItem.uid != 0 {
-						i := selectedItem.originalIndex
-						uid := selectedItem.uid
-						accountID := selectedItem.accountID
-						var email *fetcher.Email
-						if m.searchActive {
-							email = m.GetEmailAtIndex(i)
-						}
-						return m, func() tea.Msg {
-							return ViewEmailMsg{Index: i, UID: uid, AccountID: accountID, Mailbox: m.mailbox, Email: email}
-						}
+						return m, m.viewEmailCmd(selectedItem)
 					}
 				}
 			}
@@ -1179,16 +1185,7 @@ func (m *Inbox) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 				if selectedItem.uid == 0 {
 					return m, nil
 				}
-				idx := selectedItem.originalIndex
-				uid := selectedItem.uid
-				accountID := selectedItem.accountID
-				var email *fetcher.Email
-				if m.searchActive {
-					email = m.GetEmailAtIndex(idx)
-				}
-				return m, func() tea.Msg {
-					return ViewEmailMsg{Index: idx, UID: uid, AccountID: accountID, Mailbox: m.mailbox, Email: email}
-				}
+				return m, m.viewEmailCmd(selectedItem)
 			}
 		}
 	case tea.WindowSizeMsg:
@@ -1219,6 +1216,9 @@ func (m *Inbox) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 		m.selectedUIDs = make(map[uint32]string)
 		m.selectionOrder = []uint32{}
 		m.updateList()
+		if msg.Open != nil {
+			return m, m.selectAndOpen(*msg.Open)
+		}
 		return m, nil
 
 	case FetchingMoreEmailsMsg:
@@ -1526,28 +1526,66 @@ func (m *Inbox) tabAt(x int) int {
 	return -1
 }
 
-func (m *Inbox) View() tea.View {
-	m.resizeList()
+// viewAboveSearchOverlay renders the tab bar, the email list and the threaded
+// status line: everything View draws before the search box.
+func (m *Inbox) viewAboveSearchOverlay() string {
 	var b strings.Builder
-
 	// The tab bar is part of the "header" component. Skip it when a plugin
 	// has hidden the header via matcha.ui.set_visible("header", false).
-	headerVisible := isUIVisible("header")
-
-	// Render tabs if there are multiple accounts and the header is visible
-	if headerVisible && len(m.tabs) > 1 {
-		tabBar := tabBarStyle.Render(lipgloss.JoinHorizontal(lipgloss.Top, m.renderedTabs()...))
-		b.WriteString(tabBar)
+	if isUIVisible("header") && len(m.tabs) > 1 {
+		b.WriteString(tabBarStyle.Render(lipgloss.JoinHorizontal(lipgloss.Top, m.renderedTabs()...)))
 		b.WriteString("\n")
 	}
-
 	b.WriteString(m.list.View())
-
 	// When threaded, the built-in status bar is hidden because it counts
 	// list items (threads) instead of actual emails. Render our own.
 	if m.isThreaded() {
 		b.WriteString(m.threadedStatusBar())
 	}
+	return b.String()
+}
+
+// searchOverlayTop returns the row where View starts drawing the search box.
+func (m *Inbox) searchOverlayTop() int {
+	m.resizeList()
+	return lipgloss.Height(m.viewAboveSearchOverlay())
+}
+
+// viewEmailCmd opens the email of a list item.
+func (m *Inbox) viewEmailCmd(it item) tea.Cmd {
+	index, uid, accountID := it.originalIndex, it.uid, it.accountID
+	var email *fetcher.Email
+	if m.searchActive {
+		email = m.GetEmailAtIndex(index)
+	}
+	return func() tea.Msg {
+		return ViewEmailMsg{Index: index, UID: uid, AccountID: accountID, Mailbox: m.mailbox, Email: email}
+	}
+}
+
+// selectAndOpen moves the list cursor to email and opens it. Shared mailbox
+// copies are merged in the list, so the Message-ID also counts as a match.
+func (m *Inbox) selectAndOpen(email fetcher.Email) tea.Cmd {
+	for i, listItem := range m.list.Items() {
+		it, ok := listItem.(item)
+		if !ok || it.uid == 0 {
+			continue
+		}
+		sameCopy := it.uid == email.UID && it.accountID == email.AccountID
+		sameMessage := email.MessageID != "" && m.GetEmailAtIndex(it.originalIndex) != nil &&
+			m.GetEmailAtIndex(it.originalIndex).MessageID == email.MessageID
+		if sameCopy || sameMessage {
+			m.list.Select(i)
+			return m.viewEmailCmd(it)
+		}
+	}
+	return nil
+}
+
+func (m *Inbox) View() tea.View {
+	m.resizeList()
+	var b strings.Builder
+	b.WriteString(m.viewAboveSearchOverlay())
 
 	if m.searchOverlay != nil {
 		b.WriteString("\n")

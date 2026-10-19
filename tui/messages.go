@@ -227,9 +227,12 @@ type SearchResultsMsg struct {
 	Err    error
 }
 
+// ApplySearchResultsMsg shows the search results in the inbox list. When
+// Open is set, the list cursor goes to that result and the email opens.
 type ApplySearchResultsMsg struct {
 	Query  backend.SearchQuery
 	Emails []fetcher.Email
+	Open   *fetcher.Email
 }
 
 type GoToInboxMsg struct{}

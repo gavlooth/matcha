@@ -298,7 +298,9 @@ func (m *FolderInbox) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocycl
 
 	switch msg := msg.(type) {
 	case tea.MouseWheelMsg:
-		if msg.X < sidebarWidth {
+		// While the search box is open the folder stays fixed, as for keys:
+		// its results belong to the folder it was opened in.
+		if msg.X < sidebarWidth && m.inbox.searchOverlay == nil {
 			switch msg.Button {
 			case tea.MouseWheelDown:
 				m.activeFolderIdx = (m.activeFolderIdx + 1) % len(m.folders)
@@ -334,6 +336,10 @@ func (m *FolderInbox) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocycl
 			return m, nil
 		}
 		if msg.X < m.effectiveSidebarWidth() {
+			if m.inbox.searchOverlay != nil {
+				// The folder stays fixed while the search box is open.
+				return m, nil
+			}
 			folderIdx := msg.Y
 			if isUIVisible("header") {
 				folderIdx -= lipgloss.Height(sidebarTitleStyle.Render(" "))

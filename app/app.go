@@ -37,6 +37,7 @@ import (
 	"github.com/floatpane/matcha/internal/emailstore"
 	"github.com/floatpane/matcha/internal/exportcmd"
 	"github.com/floatpane/matcha/internal/fetchcmd"
+	"github.com/floatpane/matcha/internal/headerindex"
 	"github.com/floatpane/matcha/internal/idledaemon"
 	"github.com/floatpane/matcha/internal/logging"
 	"github.com/floatpane/matcha/internal/loglevel"
@@ -84,6 +85,9 @@ type Model struct {
 	providersMu sync.RWMutex
 	service     daemonclient.Service
 
+	// headerIndex is the header copy the search box matches while typing.
+	headerIndex *headerindex.Index
+
 	pendingPrompt *plugin.PendingPrompt
 	mailtoURL     *url.URL
 
@@ -123,6 +127,7 @@ func NewModel(cfg *config.Config, mailtoURL *url.URL, plugins *plugin.Manager, s
 		idleUpdates:   idleUpdates,
 		idleWatcher:   fetcher.NewIdleWatcher(idleUpdates),
 		providers:     make(map[string]backend.Provider),
+		headerIndex:   headerindex.New(),
 		mailtoURL:     mailtoURL,
 		showLogPanel:  showLogPanel,
 		logCh:         logCh,
@@ -567,6 +572,7 @@ func (m *Model) shutdownService() {
 		// re-entering the inbox builds a fresh one.
 		m.service = nil
 	}
+	fetcher.CloseIMAPPool()
 }
 
 func (m *Model) saveConfigAfterCredentials() bool {
@@ -1164,6 +1170,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 		}
 		m.folderInbox = tui.NewFolderInbox(cachedFolders, m.config.Accounts)
 		m.folderInbox.SetFolderData(cachedFolders, unread, foldersByAccount, unreadByAccount)
+		m.folderInbox.GetInbox().SetLocalSearcher(m.headerIndex)
 		m.setFolderInboxDefaults()
 		m.loadFolderInboxCache(emailstore.FolderInbox)
 		m.current = m.folderInbox
@@ -1177,6 +1184,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 			fetchcmd.FetchFoldersCmd(m.config),
 			m.fetchFolderEmailsCmd(emailstore.FolderInbox),
 			idledaemon.ListenForIdleUpdates(m.idleUpdates),
+			// Copy INBOX headers in the background so the first search matches while typing.
+			m.updateHeaderIndexCmd(emailstore.FolderInbox, ""),
 		}
 		if m.service.IsDaemon() {
 			for _, acct := range m.config.Accounts {
@@ -1566,6 +1575,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 		folderName := m.folderName()
 		m.current, _ = m.current.Update(tui.FetchingMoreEmailsMsg{FolderName: folderName})
 		return m, fetchcmd.FetchFolderEmailsPaginatedCmd(account, folderName, limit, msg.Offset)
+
+	case tui.SearchOpenedMsg:
+		return m, m.updateHeaderIndexCmd(msg.FolderName, msg.AccountID)
+
+	case headerIndexLoadedMsg:
+		return m, m.handleHeaderIndexLoaded(msg)
+
+	case headerSyncStepMsg:
+		return m, m.handleHeaderSyncStep(msg)
 
 	case tui.SearchRequestedMsg:
 		folderName := msg.FolderName

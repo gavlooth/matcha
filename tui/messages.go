@@ -227,6 +227,18 @@ type SearchResultsMsg struct {
 	Err    error
 }
 
+// SearchOpenedMsg asks the app to load and update the header copy of the
+// folder for the account (all accounts when AccountID is empty), so the
+// search box can match while typing.
+type SearchOpenedMsg struct {
+	FolderName string
+	AccountID  string
+}
+
+// LocalSearchIndexChangedMsg says the header copy on this computer changed;
+// an open search box reruns its local search.
+type LocalSearchIndexChangedMsg struct{}
+
 // ApplySearchResultsMsg shows the search results in the inbox list. When
 // Open is set, the list cursor goes to that result and the email opens.
 type ApplySearchResultsMsg struct {

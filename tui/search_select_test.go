@@ -28,8 +28,99 @@ func searchWithResults(t *testing.T, n int) *FolderInbox {
 	for i := range results {
 		results[i] = fetcher.Email{UID: uint32(i + 1), AccountID: "a", From: "s@example.com", Subject: fmt.Sprintf("Result%02d", i+1)}
 	}
+	typeText(fi, "result")
+	fi.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	fi.Update(SearchResultsMsg{Query: backend.ParseSearchQuery("result"), Emails: results})
 	return fi
+}
+
+func typeText(fi *FolderInbox, text string) {
+	for _, r := range text {
+		fi.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+}
+
+// fakeLocalSearcher matches emails whose subject contains the bare words.
+type fakeLocalSearcher struct {
+	emails  []fetcher.Email
+	folders []string
+}
+
+func (f *fakeLocalSearcher) CanSearch(q backend.SearchQuery) bool {
+	return q.Text != "" && q.Body == ""
+}
+func (f *fakeLocalSearcher) Search(q backend.SearchQuery, folder string, _ []string, _ int) []fetcher.Email {
+	f.folders = append(f.folders, folder)
+	var out []fetcher.Email
+	for _, e := range f.emails {
+		if strings.Contains(strings.ToLower(e.Subject), strings.ToLower(q.Text)) {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+func (f *fakeLocalSearcher) Count(string, []string) int    { return len(f.emails) }
+func (f *fakeLocalSearcher) Syncing(string, []string) bool { return false }
+
+func TestTypingShowsLocalMatchesAndEnterStillAsksTheServer(t *testing.T) {
+	accounts := []config.Account{{ID: "a", FetchEmail: "a@example.com"}}
+	fi := NewFolderInbox([]string{keyINBOX, "Archive"}, accounts)
+	fi.Update(tea.WindowSizeMsg{Width: 140, Height: 50})
+	local := &fakeLocalSearcher{emails: []fetcher.Email{
+		{UID: 1, AccountID: "a", Subject: "Invoice March"},
+		{UID: 2, AccountID: "a", Subject: "Invoice April"},
+		{UID: 3, AccountID: "a", Subject: "Holiday"},
+	}}
+	fi.inbox.SetLocalSearcher(local)
+	_, cmd := fi.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
+	var opened bool
+	for _, msg := range collectMsgs(cmd) {
+		if o, ok := msg.(SearchOpenedMsg); ok && o.FolderName == keyINBOX {
+			opened = true
+		}
+	}
+	if !opened {
+		t.Fatal("opening the search box did not ask the app to update the INBOX copy")
+	}
+
+	typeText(fi, "invoice")
+	overlay := fi.inbox.searchOverlay
+	if len(overlay.results) != 2 || overlay.fromServer || overlay.resultsFocused {
+		t.Fatalf("typing: %d results, from server %t, results focused %t; want 2 local matches with the query still focused", len(overlay.results), overlay.fromServer, overlay.resultsFocused)
+	}
+	if view := ansi.Strip(overlay.View()); !strings.Contains(view, "2 match(es) on this computer") {
+		t.Fatalf("local match count not shown:\n%s", view)
+	}
+
+	// ↓ lands on the first match, Enter opens it.
+	fi.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	_, cmd = fi.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if view, ok := runUntilView(fi, cmd); !ok || view.UID != 1 {
+		t.Fatalf("Enter on the first local match opened %+v (found %t)", view, ok)
+	}
+
+	// Enter while the query is focused asks the server, and stale server
+	// results for an older query are dropped.
+	fi.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
+	typeText(fi, "holiday")
+	_, cmd = fi.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	var asked bool
+	for _, msg := range collectMsgs(cmd) {
+		if _, ok := msg.(SearchRequestedMsg); ok {
+			asked = true
+		}
+	}
+	if !asked {
+		t.Fatal("Enter in the query did not search the server")
+	}
+	fi.Update(SearchResultsMsg{Query: backend.ParseSearchQuery("holi"), Emails: []fetcher.Email{{UID: 50}}})
+	if fi.inbox.searchOverlay.fromServer {
+		t.Fatal("server results for an older query replaced the current ones")
+	}
+	fi.Update(SearchResultsMsg{Query: backend.ParseSearchQuery("holiday"), Emails: []fetcher.Email{{UID: 3, Subject: "Holiday"}, {UID: 60, Subject: "Holiday plans"}}})
+	if o := fi.inbox.searchOverlay; !o.fromServer || len(o.results) != 2 || !o.resultsFocused {
+		t.Fatalf("server results not shown and focused: from server %t, %d results", o.fromServer, len(o.results))
+	}
 }
 
 // runUntilView runs cmd and feeds the messages it produces back into fi
@@ -56,7 +147,7 @@ func TestSearchResultPickedWithKeysOpens(t *testing.T) {
 	for range 10 {
 		fi.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	}
-	if got := fi.inbox.searchOverlay.input.Value(); got != "" {
+	if got := fi.inbox.searchOverlay.input.Value(); got != "result" {
 		t.Fatalf("j/k on the results were typed into the query: %q", got)
 	}
 	if view := ansi.Strip(fi.inbox.searchOverlay.View()); !strings.Contains(view, "> 12. ") {
@@ -79,7 +170,7 @@ func TestSearchTabSwitchesBetweenQueryAndResults(t *testing.T) {
 	fi := searchWithResults(t, 3)
 	fi.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	fi.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
-	if got := fi.inbox.searchOverlay.input.Value(); got != "j" {
+	if got := fi.inbox.searchOverlay.input.Value(); got != "resultj" {
 		t.Fatalf("after Tab, j should edit the query, got %q", got)
 	}
 	fi.Update(tea.KeyPressMsg{Code: tea.KeyTab})

@@ -343,6 +343,7 @@ type Inbox struct {
 	failedAccounts       map[string]string
 	pluginKeyBindings    []PluginKeyBinding
 	searchOverlay        *SearchOverlay
+	localSearcher        LocalSearcher // header copy on this computer; nil when none
 	searchActive         bool
 	searchQuery          string
 	searchResults        []fetcher.Email
@@ -1034,7 +1035,12 @@ func (m *Inbox) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 		switch keypress := msg.String(); keypress {
 		case searchBinding:
 			m.searchOverlay = NewSearchOverlay(m.width, m.height)
-			return m, m.searchOverlay.Init()
+			if m.localSearcher == nil || m.folderName == "" {
+				return m, m.searchOverlay.Init()
+			}
+			m.searchOverlay.UseLocalSearch(m.localSearcher, m.folderName, m.searchAccountIDs())
+			opened := SearchOpenedMsg{FolderName: m.folderName, AccountID: m.currentAccountID}
+			return m, tea.Batch(m.searchOverlay.Init(), func() tea.Msg { return opened })
 		case m.toggleThreadedKey():
 			m.toggleThreaded()
 			m.updateList()
@@ -1198,6 +1204,12 @@ func (m *Inbox) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 				return m, m.continueUnreadFetch()
 			}
 			return m, tea.Batch(m.fetchMoreCmds()...)
+		}
+		return m, nil
+
+	case LocalSearchIndexChangedMsg:
+		if m.searchOverlay != nil {
+			m.searchOverlay.RefreshLocal()
 		}
 		return m, nil
 
@@ -1655,6 +1667,24 @@ func (m *Inbox) GetCurrentAccountID() string {
 
 func (m *Inbox) IsSearchActive() bool {
 	return m != nil && (m.searchOverlay != nil || m.searchActive)
+}
+
+// SetLocalSearcher gives the search box the header copy on this computer.
+func (m *Inbox) SetLocalSearcher(local LocalSearcher) {
+	m.localSearcher = local
+}
+
+// searchAccountIDs returns the accounts the open tab shows: one account, or
+// every account on the ALL tab.
+func (m *Inbox) searchAccountIDs() []string {
+	if m.currentAccountID != "" {
+		return []string{m.currentAccountID}
+	}
+	ids := make([]string, 0, len(m.accounts))
+	for _, account := range m.accounts {
+		ids = append(ids, account.ID)
+	}
+	return ids
 }
 
 func (m *Inbox) IsSearchOverlayOpen() bool {

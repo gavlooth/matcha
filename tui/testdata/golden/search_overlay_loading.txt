@@ -4,6 +4,6 @@
 │                                                                          │
 │  / from:alice subject:invoice since:2026-01-01                           │
 │                                                                          │
-│  Searching...                                                            │
+│  Searching the server...                                                 │
 │                                                                          │
 ╰──────────────────────────────────────────────────────────────────────────╯

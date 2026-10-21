@@ -58,6 +58,25 @@ Visual mode allows you to select multiple emails and perform batch operations, s
 - Works in both inbox and folder views
 - Visual mode disabled during search/filtering for safety
 
+#### Search
+
+`/` opens the search box. It searches in two places:
+
+- **While you type**, Matcha searches the email headers it keeps on this computer (sender, recipients, subject, date) for the open folder and account tab. Matching ignores case and accents, finds parts of words (`verif` finds "verification") and allows skipped letters inside a word (`vrfctn` also finds it). Every word you type must match, in any order. The first time a folder is searched, its headers are copied in the background; the box shows how many are copied so far. INBOX is copied when Matcha starts.
+- **Enter** sends the search to the mail server, which also looks in email bodies. How the server matches words depends on the provider: Gmail and Yahoo match whole words only.
+
+In the result list, `↓` or `Tab` moves to the results, `j/k` or `↑/↓` pick one, `Enter` opens it, and `Tab` goes back to the query. A click picks a result and a double click opens it.
+
+Both searches accept plain words and `key:value` filters. Wrap values with spaces in quotes, e.g. `subject:"quarterly report"`.
+
+- Plain words - match the sender, recipients or subject (the server also matches the body)
+- `from:` / `to:` / `subject:` - match only that header
+- `body:` - match only the message body (server only)
+- `since:` / `before:` - date as `2026-01-31` or RFC 3339
+- `larger:` - minimum size in bytes (server only)
+
+Example: `from:alice invoice since:2026-01-01` finds mail from alice that mentions "invoice". Server searches of several accounts run at the same time, over connections that stay open for 5 minutes.
+
 ### Email View
 
 - `↑/↓` or `j/k` - Scroll email content

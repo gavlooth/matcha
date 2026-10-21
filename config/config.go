@@ -62,6 +62,7 @@ var cacheFiles = []string{
 var cacheDirectories = []string{
 	"folder_emails",
 	"email_bodies",
+	headerIndexDirName,
 }
 
 type SessionCache struct {

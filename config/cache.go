@@ -944,5 +944,6 @@ func CleanupAccountCache(accountID string) error {
 		removeAccountFromEmailBodyCaches(accountID),
 		removeAccountFromContactsCache(accountID),
 		removeAccountFromDraftsCache(accountID),
+		RemoveAccountHeaderIndex(accountID),
 	)
 }

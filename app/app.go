@@ -41,6 +41,7 @@ import (
 	"github.com/floatpane/matcha/internal/idledaemon"
 	"github.com/floatpane/matcha/internal/logging"
 	"github.com/floatpane/matcha/internal/loglevel"
+	"github.com/floatpane/matcha/internal/mailrules"
 	"github.com/floatpane/matcha/internal/notifications"
 	"github.com/floatpane/matcha/internal/palette"
 	"github.com/floatpane/matcha/internal/pluginbridge"
@@ -113,6 +114,10 @@ type Model struct {
 	// Track body fetch retries to prevent infinite loops
 	pendingBodyFetchUID   uint32
 	pendingBodyFetchCount int
+
+	mailRuleRunner    *mailrules.Runner
+	mailRuleRunning   bool
+	mailRuleLastError string
 }
 
 // NewModel creates the initial TUI model.
@@ -269,11 +274,11 @@ func (m *Model) resolveProvider(acct *config.Account) backend.Provider {
 }
 
 func (m *Model) Init() tea.Cmd {
-	cmd := m.current.Init()
+	cmds := []tea.Cmd{m.current.Init(), nextMailRuleRun(time.Second)}
 	if m.showLogPanel && m.logCh != nil {
-		return tea.Batch(cmd, waitForLogEntry(m.logCh))
+		cmds = append(cmds, waitForLogEntry(m.logCh))
 	}
-	return cmd
+	return tea.Batch(cmds...)
 }
 
 func waitForLogEntry(ch <-chan logging.Entry) tea.Cmd {
@@ -939,6 +944,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 		m.palette.UpdateSize(m.width, m.contentHeight())
 		m.current, cmd = m.current.Update(m.currentWindowSize())
 		return m, cmd
+	}
+
+	switch msg := msg.(type) {
+	case mailRuleTickMsg:
+		return m, m.startMailRules()
+	case mailRuleDoneMsg:
+		return m, m.finishMailRules(msg)
 	}
 
 	if m.palette.IsOpen() {

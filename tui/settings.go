@@ -6,6 +6,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/floatpane/matcha/config"
 	"github.com/floatpane/matcha/internal/passwordstrength"
 	"github.com/floatpane/matcha/plugin"
@@ -40,6 +41,8 @@ const (
 	CategoryEncryption
 	CategoryPlugins
 	CategoryContacts
+	CategoryRules
+	settingsCategoryCount
 )
 
 type Settings struct {
@@ -64,6 +67,9 @@ type Settings struct {
 	contactsCursor     int
 	contactsConfirming bool
 	contactsList       []config.Contact
+
+	// Local automatic mail rules.
+	rules ruleSettings
 
 	// S/MIME Config fields
 	isCryptoConfig     bool
@@ -179,16 +185,18 @@ func (m *Settings) RestoreState(state SettingsState) {
 	if state.ActiveCategory == CategoryContacts {
 		m.contactsList = config.GetNamedContacts()
 	}
+	if state.ActiveCategory == CategoryRules {
+		m.loadRules()
+	}
 }
 
 func (m *Settings) Init() tea.Cmd {
 	return textinput.Blink
 }
 
-// categoriesStartY returns the screen row where the first settings category appears.
-// Layout: docStyle top margin (1) + title row (1) + \n\n (2) = 4.
+// categoriesStartY returns the first category row after the title and blank line.
 func (m *Settings) categoriesStartY() int {
-	return 4
+	return docStyle.GetMarginTop() + 2
 }
 
 func (m *Settings) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -200,7 +208,7 @@ func (m *Settings) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.activePane == PaneMenu {
 			switch msg.Button {
 			case tea.MouseWheelDown:
-				if m.menuCursor < 6 {
+				if m.menuCursor < int(settingsCategoryCount)-1 {
 					m.menuCursor++
 					m.activeCategory = SettingsCategory(m.menuCursor)
 				}
@@ -210,19 +218,31 @@ func (m *Settings) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.activeCategory = SettingsCategory(m.menuCursor)
 				}
 			}
+			if m.activeCategory == CategoryRules && !m.rules.loaded {
+				m.loadRules()
+			}
+		}
+		if m.activePane == PaneContent && m.activeCategory == CategoryRules {
+			return m.updateRulesMouseWheel(msg)
 		}
 		return m, tea.Batch(cmds...)
 
 	case tea.MouseClickMsg:
 		if msg.Button == tea.MouseLeft {
-			// Left pane: docStyle left margin (2) through left pane width (30) + margin = x < 32
-			if msg.X >= 2 && msg.X < 32 {
-				catIdx := msg.Y - m.categoriesStartY()
-				if catIdx >= 0 && catIdx < 7 {
+			if msg.X >= 2 && msg.X < 2+m.settingsMenuWidth() {
+				first, count := m.settingsMenuWindow()
+				catIdx := msg.Y - m.categoriesStartY() + first
+				if catIdx >= first && catIdx < first+count {
 					m.menuCursor = catIdx
 					m.activeCategory = SettingsCategory(catIdx)
 					m.activePane = PaneContent
+					if m.activeCategory == CategoryRules && !m.rules.loaded {
+						m.loadRules()
+					}
 				}
+			}
+			if m.activeCategory == CategoryRules && msg.X >= 2+m.settingsMenuWidth() {
+				return m.updateRulesMouseClick(msg)
 			}
 		}
 		return m, tea.Batch(cmds...)
@@ -230,16 +250,14 @@ func (m *Settings) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		inputWidth := (m.width - 30) - 6 // left pane is 30
-		if inputWidth < 20 {
-			inputWidth = 20
-		}
+		inputWidth := max(1, m.width-6-m.settingsMenuWidth())
 		m.smimeCertInput.SetWidth(inputWidth)
 		m.smimeKeyInput.SetWidth(inputWidth)
 		m.pgpPublicKeyInput.SetWidth(inputWidth)
 		m.pgpPrivateKeyInput.SetWidth(inputWidth)
 		m.pgpPINInput.SetWidth(inputWidth)
 		m.pluginInput.SetWidth(inputWidth)
+		m.resizeRuleInputs()
 		return m, nil
 
 	case tea.KeyPressMsg:
@@ -286,6 +304,8 @@ func (m *Settings) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case m.activeCategory == CategoryPlugins && m.pluginEditing:
 			m.pluginInput, cmd = m.pluginInput.Update(msg)
 			cmds = append(cmds, cmd)
+		case m.activeCategory == CategoryRules && m.rules.editing:
+			return m.updateRuleInput(msg)
 		}
 	}
 
@@ -293,6 +313,10 @@ func (m *Settings) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Settings) updateKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	// Rules own their modal and input keys, including Escape and cursor movement.
+	if m.activePane == PaneContent && m.activeCategory == CategoryRules {
+		return m.updateRules(msg)
+	}
 	// Global shortcut to return to menu from content pane
 	if m.activePane == PaneContent && msg.String() == "esc" {
 		// unless we are in crypto config or encryption editing which have their own esc logic
@@ -342,6 +366,8 @@ func (m *Settings) canFocusSettingsMenuWithLeft() bool {
 		return !m.pluginEditing && m.pluginSelected == ""
 	case CategoryContacts:
 		return !m.contactsConfirming
+	case CategoryRules:
+		return !m.rules.editing && !m.rules.confirming && !m.rules.help
 	case CategoryGeneral, CategoryTheme, CategoryMailingLists:
 		return true
 	default:
@@ -371,7 +397,7 @@ func (m *Settings) contentFocusStyle() lipgloss.Style {
 }
 
 func (m *Settings) updateMenu(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	categoryCount := int(CategoryContacts) + 1
+	categoryCount := int(settingsCategoryCount)
 
 	switch msg.String() {
 	case "up", "k":
@@ -390,6 +416,10 @@ func (m *Settings) updateMenu(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case CategoryContacts:
 			m.contactsConfirming = false
 			m.contactsList = config.GetNamedContacts()
+		case CategoryRules:
+			if !m.rules.loaded {
+				m.loadRules()
+			}
 		case CategoryTheme:
 			// Find current theme index
 			themes := theme.AllThemes()
@@ -418,13 +448,16 @@ func (m *Settings) updateMenu(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, func() tea.Msg { return GoToChoiceMenuMsg{} }
 	}
 	m.activeCategory = SettingsCategory(m.menuCursor)
+	if m.activeCategory == CategoryRules && !m.rules.loaded {
+		m.loadRules()
+	}
 	return m, nil
 }
 
 func (m *Settings) View() tea.View {
 	// Left pane
 	var left strings.Builder
-	left.WriteString(titleStyle.Render(t("settings.title")) + "\n\n")
+	left.WriteString(titleStyle.Render(ansi.Truncate(t("settings.title"), m.settingsMenuWidth()-5, "…")) + "\n\n")
 
 	categories := []string{
 		t("settings.category_general"),
@@ -434,8 +467,11 @@ func (m *Settings) View() tea.View {
 		t("settings.category_encryption"),
 		t("settings.category_plugins"),
 		t("settings.category_contacts"),
+		"Rules",
 	}
-	for i, c := range categories {
+	first, count := m.settingsMenuWindow()
+	for i := first; i < first+count; i++ {
+		c := categories[i]
 		cursor := "  "
 		if m.menuCursor == i {
 			if m.activePane == PaneMenu {
@@ -454,11 +490,11 @@ func (m *Settings) View() tea.View {
 			}
 		}
 
-		left.WriteString(style.Render(cursor+c) + "\n")
+		left.WriteString(style.Render(ansi.Truncate(cursor+c, m.settingsMenuWidth()-5, "…")) + "\n")
 	}
 
 	leftPanel := lipgloss.NewStyle().
-		Width(30).
+		Width(m.settingsMenuWidth()).
 		PaddingRight(2).
 		Border(lipgloss.NormalBorder(), false, true, false, false).
 		BorderForeground(theme.ActiveTheme.Secondary).
@@ -481,11 +517,13 @@ func (m *Settings) View() tea.View {
 		right = m.viewPlugins()
 	case CategoryContacts:
 		right = m.viewContacts()
+	case CategoryRules:
+		right = m.viewRules()
 	}
 
 	rightPanel := lipgloss.NewStyle().
 		PaddingLeft(2).
-		Width(m.width - 34). // 30 (left) + 2 (border) + 2 (padding)
+		Width(max(1, m.width-4-m.settingsMenuWidth())).
 		Render(right)
 
 	content := lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, rightPanel)
@@ -494,11 +532,14 @@ func (m *Settings) View() tea.View {
 	if m.activePane == PaneMenu {
 		helpText = t("settings.help_menu")
 	}
+	if m.activeCategory == CategoryRules {
+		helpText = ""
+	}
 	helpView := helpStyle.Render(helpText)
 
 	if m.height > 0 {
-		currentHeight := lipgloss.Height(content + "\n\n" + helpView)
-		gap := m.height - currentHeight
+		currentHeight := lipgloss.Height(content + helpView)
+		gap := m.height - docStyle.GetVerticalFrameSize() - currentHeight
 		if gap > 0 {
 			content += strings.Repeat("\n", gap)
 		}

@@ -103,6 +103,24 @@ Example: `from:alice invoice since:2026-01-01` finds mail from alice that mentio
 - `↑/↓` - Navigate contact suggestions (when typing in "To" field)
 - `Esc` - Save draft and exit
 
+## Automatic Email Rules
+
+Open **Settings → Rules** to manage local rules for your IMAP accounts. Rules run while the Matcha TUI is open, including when you are on the start menu or composing mail. They do not run in the background daemon after you close the TUI, and do not require Sieve or provider-specific authorization.
+
+- Press `n` to create a rule, or select one and press `Enter` to edit it. New rules are disabled until you enable them.
+- Choose all configured accounts or one account. Add sender, recipient or subject conditions: matching uses case-insensitive substrings, and every nonempty condition must match. The recipient condition includes To and Cc.
+- Choose **Mark read**, a destination folder, or both. The destination must already exist in each affected account; moving requires the server's IMAP MOVE capability. Matcha never uses a move fallback that could expunge unrelated messages.
+- Use `Tab`/`Shift+Tab` or `↑`/`↓` between form fields, `←`/`→` to choose an account, `Space`/`Enter` to toggle options, and `Ctrl+S` to save. `Esc` cancels editing.
+- In the rule list, `Space` enables/disables, `d` asks before deleting, uppercase `K`/`J` changes order, and `r` reloads saved definitions. The **first enabled matching rule wins**, even if it only marks the message read.
+
+Rules apply to **future incoming INBOX mail**, not messages already in your inbox. New, edited, reordered or newly enabled rules establish their starting point at the next background check, at most 30 seconds after saving. Mail already present at that check is left alone. After this starting point, unchanged rules also process mail that arrives while Matcha is closed when you open it again.
+
+Each check processes at most 100 messages per applicable account, with further batches one second apart. Progress is saved between batches and across restarts. Multiple Matcha windows share a processing lock. Failed actions show an error and are retried at the normal 30-second interval without skipping the failed message; if marking read succeeds but moving fails, that message remains read.
+
+Definitions are stored in `~/.config/matcha/mail_rules.json`; processing progress is in `~/.cache/matcha/mail_rules_progress.json`. Both follow Matcha's encryption setting. Use the Settings UI to edit rules so activation information is updated correctly. Clearing progress establishes a new starting point rather than replaying old messages.
+
+If enabling encryption reports an existing-file migration failure, Matcha retains the vault metadata so files already encrypted remain recoverable with your password. Correct the reported file-access problem, then disable and re-enable encryption to finish migrating all files.
+
 ## CLI Commands
 
 Matcha includes several CLI subcommands that work without launching the TUI.

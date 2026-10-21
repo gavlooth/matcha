@@ -124,21 +124,15 @@ func EnableSecureMode(password string, cfg *Config) error {
 		return fmt.Errorf("could not initialise secure vault: %w", err)
 	}
 
-	rollback := func() {
-		v.Lock()
-		path, _ := secureMetaPath()
-		_ = os.Remove(path)
-	}
-
 	if cfg != nil {
 		if err := SaveConfig(cfg); err != nil {
-			rollback()
-			return fmt.Errorf("failed to save encrypted config: %w", err)
+			return fmt.Errorf("secure vault retained, but saving encrypted config failed: %w", err)
 		}
 	}
 	if err := reEncryptCacheFiles(); err != nil {
-		rollback()
-		return fmt.Errorf("failed to encrypt existing files: %w", err)
+		// Earlier files may already be encrypted. Keep their key and metadata
+		// so the password can still recover them after a restart.
+		return fmt.Errorf("secure vault retained, but encrypting existing files failed; disable and re-enable encryption to retry: %w", err)
 	}
 	return nil
 }
@@ -203,6 +197,44 @@ func SecureWriteFile(path string, data []byte, perm os.FileMode) error {
 	return v.WriteFile(path, data, perm)
 }
 
+// AtomicSecureWriteFile saves private data with the same encryption policy as
+// SecureWriteFile, replacing the destination only after the new file is synced.
+// Both new and replaced files have mode 0600.
+func AtomicSecureWriteFile(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".matcha-private-*")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	defer os.Remove(name) //nolint:errcheck
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := SecureWriteFile(name, data, 0600); err != nil {
+		return err
+	}
+	file, err := os.OpenFile(name, os.O_RDWR, 0600)
+	if err != nil {
+		return err
+	}
+	err = file.Chmod(0600)
+	if err == nil {
+		err = file.Sync()
+	}
+	closeErr := file.Close()
+	if err != nil {
+		return err
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	return os.Rename(name, path)
+}
+
 // reEncryptCacheFiles reads all plain data files (excluding config.json) and
 // writes them encrypted via the unlocked vault.
 func reEncryptCacheFiles() error {
@@ -216,8 +248,11 @@ func reEncryptCacheFiles() error {
 			continue
 		}
 		data, err := os.ReadFile(f)
-		if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
 			continue
+		}
+		if err != nil {
+			return fmt.Errorf("read data file %q: %w", filepath.Base(f), err)
 		}
 		if err := secureWriteDataFile(f, data, 0o600); err != nil {
 			return err
@@ -235,6 +270,7 @@ func collectDataFiles() ([]string, error) {
 		return nil, err
 	}
 	files = append(files, filepath.Join(cfgDir, "config.json"))
+	files = append(files, filepath.Join(cfgDir, mailRulesFileName))
 
 	cDir, err := cacheDir()
 	if err != nil {

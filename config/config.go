@@ -57,6 +57,7 @@ var cacheFiles = []string{
 	"contacts.json",
 	"drafts.json",
 	"folder_cache.json",
+	"mail_rules_progress.json",
 }
 
 var cacheDirectories = []string{

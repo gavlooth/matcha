@@ -446,12 +446,6 @@ func (p *Provider) matchOpen(msg *emaildir.Message) (backend.Email, string, erro
 
 // matchesQuery applies the parsed search filters to an email + body.
 func matchesQuery(email backend.Email, body string, query backend.SearchQuery) bool {
-	containsCI := func(haystack, needle string) bool {
-		if needle == "" {
-			return true
-		}
-		return strings.Contains(strings.ToLower(haystack), strings.ToLower(needle))
-	}
 	if !containsCI(email.From, query.From) {
 		return false
 	}
@@ -473,6 +467,11 @@ func matchesQuery(email backend.Email, body string, query backend.SearchQuery) b
 	if !containsCI(body, query.Body) {
 		return false
 	}
+	for _, term := range query.Terms() {
+		if !matchesText(email, body, term) {
+			return false
+		}
+	}
 	if !query.Since.IsZero() && email.Date.Before(query.Since) {
 		return false
 	}
@@ -480,6 +479,29 @@ func matchesQuery(email backend.Email, body string, query backend.SearchQuery) b
 		return false
 	}
 	return true
+}
+
+// matchesText reports whether text appears in the sender, any recipient, the
+// subject, or the body.
+func matchesText(email backend.Email, body, text string) bool {
+	if containsCI(email.From, text) || containsCI(email.Subject, text) || containsCI(body, text) {
+		return true
+	}
+	for _, addr := range email.To {
+		if containsCI(addr, text) {
+			return true
+		}
+	}
+	return false
+}
+
+// containsCI reports whether needle appears in haystack, ignoring case.
+// An empty needle always matches.
+func containsCI(haystack, needle string) bool {
+	if needle == "" {
+		return true
+	}
+	return strings.Contains(strings.ToLower(haystack), strings.ToLower(needle))
 }
 
 // Watch is not supported. Future: fsnotify on new/ to emit NotifyNewEmail.

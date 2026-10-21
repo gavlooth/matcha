@@ -268,6 +268,47 @@ func TestSearchFiltersBySubject(t *testing.T) {
 	}
 }
 
+func TestSearchTextFindsWordOnlyInSubject(t *testing.T) {
+	root := makeMaildir(t)
+	t0 := time.Now()
+	dropMessage(t, root, "k1.host", "Quarterly Invoice", "nothing here", t0)
+	dropMessage(t, root, "k2.host", "beta notice", "unrelated body", t0)
+
+	p := newProvider(t, root)
+	results, err := p.Search(context.Background(), "INBOX", backend.ParseSearchQuery("invoice"))
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(results) != 1 || results[0].Subject != "Quarterly Invoice" {
+		t.Fatalf("want only the Quarterly Invoice message, got %+v", results)
+	}
+
+	// A body-only search must not match a word that is only in the subject.
+	results, err = p.Search(context.Background(), "INBOX", backend.SearchQuery{Body: "invoice"})
+	if err != nil {
+		t.Fatalf("Search body: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("body search for a subject-only word returned %+v", results)
+	}
+}
+
+func TestMatchesTextChecksSenderRecipientsSubjectAndBody(t *testing.T) {
+	email := backend.Email{
+		From:    "Alice <alice@example.com>",
+		To:      []string{"bob@example.com", "carol@example.org"},
+		Subject: "Weekly sync",
+	}
+	for _, word := range []string{"ALICE", "carol", "weekly", "agenda"} {
+		if !matchesQuery(email, "the agenda is attached", backend.SearchQuery{Text: word}) {
+			t.Errorf("Text %q did not match", word)
+		}
+	}
+	if matchesQuery(email, "the agenda is attached", backend.SearchQuery{Text: "missing"}) {
+		t.Error("Text missing matched")
+	}
+}
+
 func TestCapabilitiesReflectsArchivePresence(t *testing.T) {
 	root := makeMaildir(t)
 	pNoArchive := newProvider(t, root)
@@ -341,5 +382,15 @@ func TestNestedLayoutListsFoldersAndFetchesInbox(t *testing.T) {
 
 	if !p.Capabilities().CanArchive {
 		t.Error("CanArchive should be true when Archive subfolder exists in nested layout")
+	}
+}
+
+func TestSearchTextWordsMatchInAnyOrder(t *testing.T) {
+	email := backend.Email{From: "billing@example.com", Subject: "March invoice"}
+	if !matchesQuery(email, "", backend.ParseSearchQuery("invoice march")) {
+		t.Fatal("bare words in another order than the subject did not match")
+	}
+	if matchesQuery(email, "", backend.ParseSearchQuery("invoice april")) {
+		t.Fatal("a mail matched although one bare word appears nowhere")
 	}
 }

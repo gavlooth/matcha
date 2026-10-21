@@ -24,3 +24,10 @@ func TestBuildSearchFilter(t *testing.T) {
 		t.Fatalf("date filters = after:%v before:%v", f.After, f.Before)
 	}
 }
+
+func TestBuildSearchFilterText(t *testing.T) {
+	f := buildSearchFilter(jmapclient.ID("mailbox-id"), backend.ParseSearchQuery("quarterly invoice"))
+	if f.Text != "quarterly invoice" || f.Body != "" {
+		t.Fatalf("Text = %q Body = %q, want Text quarterly invoice and empty Body", f.Text, f.Body)
+	}
+}

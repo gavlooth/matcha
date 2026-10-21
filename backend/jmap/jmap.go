@@ -275,6 +275,9 @@ func buildSearchFilter(mboxID jmapclient.ID, query backend.SearchQuery) *email.F
 	if query.Body != "" {
 		f.Body = query.Body
 	}
+	if query.Text != "" {
+		f.Text = query.Text
+	}
 	if !query.Since.IsZero() {
 		f.After = &query.Since
 	}

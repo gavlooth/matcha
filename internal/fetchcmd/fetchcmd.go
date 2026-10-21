@@ -66,7 +66,13 @@ func RefreshEmails(cfg *config.Config, mailbox tui.MailboxKind, counts map[strin
 
 // SearchEmailsCmd searches backend providers across all matching accounts and
 // returns the merged results. resolveProvider is the caller-supplied callback
-// used to obtain a backend.Provider for each account.
+// used to obtain a backend.Provider for each account; it is called from one
+// goroutine per account, so it must be safe for concurrent use.
+//
+// All accounts are searched at the same time and share one timeout. Accounts
+// whose backend does not support search are skipped. An error is reported
+// only when no account succeeded; it is the error of the first failing
+// account in configuration order.
 func SearchEmailsCmd(cfg *config.Config, resolveProvider ProviderResolver, query backend.SearchQuery, folderName, accountID string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), httpclient.IMAPSearchTimeout)
@@ -79,30 +85,38 @@ func SearchEmailsCmd(cfg *config.Config, resolveProvider ProviderResolver, query
 			}
 		}
 
+		// Each goroutine writes only its own slot, so no lock is needed.
+		type accountResult struct {
+			emails []backend.Email
+			err    error
+		}
+		perAccount := make([]accountResult, len(accounts))
+		var wg sync.WaitGroup
+		for i := range accounts {
+			wg.Go(func() {
+				acc := &accounts[i]
+				p := resolveProvider(acc)
+				if p == nil {
+					perAccount[i].err = fmt.Errorf("provider not found for account %s", acc.ID)
+					return
+				}
+				perAccount[i].emails, perAccount[i].err = p.Search(ctx, folderName, query)
+			})
+		}
+		wg.Wait()
+
 		var results []fetcher.Email
 		var firstErr error
 		succeeded := false
-		for i := range accounts {
-			acc := &accounts[i]
-			p := resolveProvider(acc)
-			if p == nil {
-				if firstErr == nil {
-					firstErr = fmt.Errorf("provider not found for account %s", acc.ID)
-				}
-				continue
-			}
-			emails, err := p.Search(ctx, folderName, query)
-			if err != nil {
-				if errors.Is(err, backend.ErrNotSupported) {
-					continue
-				}
-				if firstErr == nil {
-					firstErr = err
+		for _, r := range perAccount {
+			if r.err != nil {
+				if !errors.Is(r.err, backend.ErrNotSupported) && firstErr == nil {
+					firstErr = r.err
 				}
 				continue
 			}
 			succeeded = true
-			results = append(results, BackendEmailsToFetcher(emails)...)
+			results = append(results, BackendEmailsToFetcher(r.emails)...)
 		}
 		if !succeeded && firstErr != nil {
 			return tui.SearchResultsMsg{Query: query, Err: firstErr}

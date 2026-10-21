@@ -110,27 +110,45 @@ type Attachment struct {
 }
 
 // SearchQuery is the parsed form of a user query string.
+// Text holds the bare words of the query; servers match it against the
+// headers (from, to, cc, subject) and the body. Body matches only the body.
+// TextTerms are the same words one by one (a quoted phrase stays one term);
+// every term must match, in any order.
 type SearchQuery struct {
 	Raw        string
 	From       string
 	To         string
 	Subject    string
 	Body       string
+	Text       string
+	TextTerms  []string
 	Since      time.Time
 	Before     time.Time
 	LargerThan int
 	Limit      uint32
 }
 
+// Terms returns TextTerms, or Text as one term for a query built by hand.
+func (q SearchQuery) Terms() []string {
+	if len(q.TextTerms) > 0 {
+		return q.TextTerms
+	}
+	if q.Text != "" {
+		return []string{q.Text}
+	}
+	return nil
+}
+
 // ParseSearchQuery parses a compact search DSL into a SearchQuery.
+// Words without a known "key:" prefix are joined with spaces into Text.
 func ParseSearchQuery(s string) SearchQuery {
 	query := SearchQuery{Raw: s}
-	var bodyTerms []string
+	var textTerms []string
 
 	for _, term := range tokenizeSearchQuery(s) {
 		key, value, ok := strings.Cut(term, ":")
 		if !ok || value == "" {
-			bodyTerms = append(bodyTerms, term)
+			textTerms = append(textTerms, term)
 			continue
 		}
 
@@ -156,12 +174,13 @@ func ParseSearchQuery(s string) SearchQuery {
 				query.LargerThan = n
 			}
 		default:
-			bodyTerms = append(bodyTerms, term)
+			textTerms = append(textTerms, term)
 		}
 	}
 
-	if query.Body == "" && len(bodyTerms) > 0 {
-		query.Body = strings.Join(bodyTerms, " ")
+	if len(textTerms) > 0 {
+		query.Text = strings.Join(textTerms, " ")
+		query.TextTerms = textTerms
 	}
 
 	return query

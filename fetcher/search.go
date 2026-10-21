@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"github.com/emersion/go-imap/v2"
+	"github.com/emersion/go-imap/v2/imapclient"
 	"github.com/floatpane/matcha/backend"
 	"github.com/floatpane/matcha/config"
 )
@@ -25,12 +26,21 @@ func SearchMailbox(account *config.Account, folder string, query backend.SearchQ
 		return backendEmailsToFetcher(emails), nil
 	}
 
-	c, err := connect(account)
+	var emails []Email
+	err := withIMAPClient(account, func(c *imapclient.Client) error {
+		var err error
+		emails, err = searchWithClient(c, account, folder, query)
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer c.Close() //nolint:errcheck
+	return emails, nil
+}
 
+// searchWithClient selects folder on c, runs the search and fetches the
+// envelopes of the newest matches.
+func searchWithClient(c *imapclient.Client, account *config.Account, folder string, query backend.SearchQuery) ([]Email, error) {
 	if _, err := c.Select(folder, nil).Wait(); err != nil {
 		return nil, err
 	}
@@ -123,6 +133,8 @@ func buildSearchCriteria(query backend.SearchQuery) *imap.SearchCriteria {
 	if query.Body != "" {
 		criteria.Body = []string{query.Body}
 	}
+	// Several TEXT keys are ANDed by the server, so word order does not matter.
+	criteria.Text = query.Terms()
 	if !query.Since.IsZero() {
 		criteria.Since = query.Since
 	}

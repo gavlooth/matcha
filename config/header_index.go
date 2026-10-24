@@ -19,13 +19,17 @@ const headerIndexDirName = "header_index"
 // account, used to search mail on this computer. UIDValidity is the folder's
 // IMAP UIDVALIDITY when the headers were fetched; a different value on the
 // server means the UIDs changed and the index must be fetched again.
-// OtherUIDs are messages in the folder addressed to another account that
-// shares the mailbox; they are kept so they are not fetched again.
+// OtherUIDs are messages in the folder that name none of the account's
+// addresses; they are kept so they are not fetched again. AddressSettings
+// describes the account's address settings the folder was sorted with; when
+// the user changes them the folder is fetched again, so mail hidden before
+// can show up and mail that no longer matches goes away.
 type HeaderIndex struct {
-	UIDValidity uint32        `json:"uid_validity"`
-	Emails      []CachedEmail `json:"emails"`
-	OtherUIDs   []uint32      `json:"other_uids,omitempty"`
-	UpdatedAt   time.Time     `json:"updated_at"`
+	UIDValidity     uint32        `json:"uid_validity"`
+	AddressSettings string        `json:"address_settings,omitempty"`
+	Emails          []CachedEmail `json:"emails"`
+	OtherUIDs       []uint32      `json:"other_uids,omitempty"`
+	UpdatedAt       time.Time     `json:"updated_at"`
 }
 
 func headerIndexDir() (string, error) {

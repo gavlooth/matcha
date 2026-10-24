@@ -74,24 +74,29 @@ type ActionGracePeriodExpiredMsg struct {
 }
 
 type Credentials struct {
-	Provider     string
-	Name         string
-	Host         string // Host (this was the previous "Email Address" field in the UI)
-	FetchEmail   string // Single email address to fetch messages for. If empty, code should default this to Host when creating the account.
-	SendAsEmail  string // Optional From header email. If empty, sending falls back to FetchEmail, then Host.
-	CatchAll     bool   // Show all inbox messages regardless of To address.
-	Password     string
-	IMAPServer   string
-	IMAPPort     int
-	SMTPServer   string
-	SMTPPort     int
-	Insecure     bool
-	AuthMethod   string // "password" or "oauth2"
-	Protocol     string // "imap" (default), "jmap", or "pop3"
-	JMAPEndpoint string // JMAP session URL
-	POP3Server   string // POP3 server hostname
-	POP3Port     int    // POP3 server port
-	MaildirPath  string // Local Maildir root
+	Provider    string
+	Name        string
+	Host        string // Host (this was the previous "Email Address" field in the UI)
+	FetchEmail  string // Single email address to fetch messages for. If empty, code should default this to Host when creating the account.
+	SendAsEmail string // Optional From header email. If empty, sending falls back to FetchEmail, then Host.
+	CatchAll    bool   // Show all inbox messages regardless of To address.
+	// ExtraAddresses are more addresses of the account; mail to them is shown too.
+	ExtraAddresses []string
+	// AlwaysShowMailFrom are senders (addresses or domains) whose mail is shown
+	// even when it names none of the account's addresses, as with Bcc.
+	AlwaysShowMailFrom []string
+	Password           string
+	IMAPServer         string
+	IMAPPort           int
+	SMTPServer         string
+	SMTPPort           int
+	Insecure           bool
+	AuthMethod         string // "password" or "oauth2"
+	Protocol           string // "imap" (default), "jmap", or "pop3"
+	JMAPEndpoint       string // JMAP session URL
+	POP3Server         string // POP3 server hostname
+	POP3Port           int    // POP3 server port
+	MaildirPath        string // Local Maildir root
 }
 
 // StartOAuth2Msg is sent when the user requests OAuth2 authorization for a Gmail account.
@@ -459,13 +464,20 @@ type GoToAddMailingListMsg struct{}
 
 // GoToEditAccountMsg signals navigation to edit an existing account.
 type GoToEditAccountMsg struct {
-	AccountID    string
-	Provider     string
-	Name         string
-	Email        string
-	FetchEmail   string
-	SendAsEmail  string
-	CatchAll     bool
+	AccountID   string
+	Provider    string
+	Name        string
+	Email       string
+	FetchEmail  string
+	SendAsEmail string
+	CatchAll    bool
+	// ExtraAddresses and AlwaysShowMailFrom are the account's address settings,
+	// see config.Account.
+	ExtraAddresses     []string
+	AlwaysShowMailFrom []string
+	// AuthMethod is kept so editing an OAuth2 account does not turn it into a
+	// password account.
+	AuthMethod   string
 	IMAPServer   string
 	IMAPPort     int
 	SMTPServer   string

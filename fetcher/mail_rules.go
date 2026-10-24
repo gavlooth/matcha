@@ -126,7 +126,7 @@ func applyMailRulesOnClient(c *imapclient.Client, account *config.Account, rules
 	*operation = "fetch INBOX envelopes"
 	deliverySection := &imap.FetchItemBodySection{
 		Specifier:    imap.PartSpecifierHeader,
-		HeaderFields: []string{"Delivered-To", "X-Forwarded-To", "X-Original-To"},
+		HeaderFields: deliveryHeaderNames,
 		Peek:         true,
 	}
 	options := &imap.FetchOptions{UID: true, Envelope: true, Flags: true}
@@ -141,7 +141,7 @@ func applyMailRulesOnClient(c *imapclient.Client, account *config.Account, rules
 	for _, message := range messages {
 		byUID[message.UID] = message
 	}
-	fetchEmail := determineFetchEmail(account)
+	addresses := newAccountAddresses(account)
 	for _, uid := range uids {
 		*currentUID, *ruleID = uint32(uid), ""
 		message := byUID[uid]
@@ -163,7 +163,7 @@ func applyMailRulesOnClient(c *imapclient.Client, account *config.Account, rules
 			for _, address := range message.Envelope.Cc {
 				recipients = append(recipients, address.Addr())
 			}
-			if !messageMatchesAccount(message, recipients, fetchEmail, account, false, deliverySection) {
+			if !messageMatchesAccount(message, recipients, addresses, false, deliverySection) {
 				batch.Progress.LastUID = uint32(uid)
 				batch.Processed++
 				continue

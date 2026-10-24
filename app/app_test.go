@@ -176,3 +176,23 @@ func TestBrowserSignInSwitchesAccountToMatchaTokens(t *testing.T) {
 		t.Fatal("sign-in started from settings did not return to settings")
 	}
 }
+
+func TestEditingAccountKeepsSettingsTheFormDoesNotShow(t *testing.T) {
+	existing := config.Account{
+		ID: "a", Email: "me@outlook.com", ServiceProvider: "outlook", AuthMethod: "oauth2",
+		OAuthTokenCmd: "token-cmd", PassCmd: "pass-cmd", PGPKeySource: "file", PGPPublicKey: "pub.asc",
+		Password: "kept",
+	}
+	edited := buildAccount("a", tui.Credentials{
+		Provider: "outlook", Host: "me@outlook.com", AuthMethod: "oauth2",
+		ExtraAddresses: []string{"old@outlook.com"},
+	}, "me@outlook.com")
+
+	got := withEditedFields(existing, edited)
+	if got.OAuthTokenCmd != "token-cmd" || got.PassCmd != "pass-cmd" || got.PGPKeySource != "file" || got.PGPPublicKey != "pub.asc" || got.Password != "kept" {
+		t.Fatalf("editing lost settings the form does not show: %+v", got)
+	}
+	if !slices.Equal(got.ExtraAddresses, []string{"old@outlook.com"}) {
+		t.Fatalf("ExtraAddresses = %v, want the edited list", got.ExtraAddresses)
+	}
+}

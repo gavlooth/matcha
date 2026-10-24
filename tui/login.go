@@ -3,6 +3,7 @@ package tui
 import (
 	"strconv"
 	"strings"
+	"unicode"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
@@ -49,8 +50,10 @@ const (
 	inputSMTPServer
 	inputSMTPPort
 	inputInsecure
-	inputCatchAll     // "true/false" — show all inbox messages regardless of To address
-	inputJMAPEndpoint // JMAP session URL
+	inputCatchAll           // "true/false" — show all inbox messages regardless of To address
+	inputExtraAddresses     // comma-separated aliases that also deliver to this account
+	inputAlwaysShowMailFrom // comma-separated senders or domains shown even without one of the account's addresses
+	inputJMAPEndpoint       // JMAP session URL
 	inputPOP3Server
 	inputPOP3Port
 	inputMaildirPath // Local Maildir root path
@@ -118,6 +121,14 @@ func NewLogin(hideTips bool) *Login {
 		case inputCatchAll:
 			t.Placeholder = "Catch-All (true/false) - Show all inbox messages"
 			t.Prompt = "📬 > "
+		case inputExtraAddresses:
+			t.Placeholder = "Extra addresses (comma-separated aliases, optional)"
+			t.Prompt = "🏷️ > "
+			t.CharLimit = 1024
+		case inputAlwaysShowMailFrom:
+			t.Placeholder = "Always show mail from (comma-separated senders or domains, optional)"
+			t.Prompt = "⭐ > "
+			t.CharLimit = 1024
 		case inputJMAPEndpoint:
 			t.Placeholder = "JMAP Session URL (e.g., https://api.fastmail.com/jmap/session)"
 			t.Prompt = "🔗 > "
@@ -178,17 +189,17 @@ func (m *Login) visibleFields() []int {
 	switch proto {
 	case protocolJMAP:
 		// JMAP: no provider selector, just endpoint + common fields
-		fields = append(fields, inputName, inputEmail, inputFetchEmail, inputSendAsEmail, inputCatchAll, inputAuthMethod, inputPassword, inputJMAPEndpoint)
+		fields = append(fields, inputName, inputEmail, inputFetchEmail, inputSendAsEmail, inputCatchAll, inputExtraAddresses, inputAlwaysShowMailFrom, inputAuthMethod, inputPassword, inputJMAPEndpoint)
 	case protocolPOP3:
 		// POP3: custom server fields + SMTP for sending
-		fields = append(fields, inputName, inputEmail, inputFetchEmail, inputSendAsEmail, inputCatchAll, inputPassword,
+		fields = append(fields, inputName, inputEmail, inputFetchEmail, inputSendAsEmail, inputCatchAll, inputExtraAddresses, inputAlwaysShowMailFrom, inputPassword,
 			inputPOP3Server, inputPOP3Port, inputSMTPServer, inputSMTPPort, inputInsecure)
 	case protocolMaildir:
 		// Maildir: local filesystem only — no auth, no network.
-		fields = append(fields, inputName, inputEmail, inputFetchEmail, inputSendAsEmail, inputCatchAll, inputMaildirPath)
+		fields = append(fields, inputName, inputEmail, inputFetchEmail, inputSendAsEmail, inputCatchAll, inputExtraAddresses, inputAlwaysShowMailFrom, inputMaildirPath)
 	default:
 		// IMAP (default): existing flow
-		fields = append(fields, inputProvider, inputName, inputEmail, inputFetchEmail, inputSendAsEmail, inputCatchAll)
+		fields = append(fields, inputProvider, inputName, inputEmail, inputFetchEmail, inputSendAsEmail, inputCatchAll, inputExtraAddresses, inputAlwaysShowMailFrom)
 		if hasOAuth {
 			fields = append(fields, inputAuthMethod)
 		}
@@ -362,26 +373,36 @@ func (m *Login) submitForm() func() tea.Msg {
 
 	return func() tea.Msg {
 		return Credentials{
-			Protocol:     proto,
-			Provider:     m.inputs[inputProvider].Value(),
-			Name:         m.inputs[inputName].Value(),
-			Host:         m.inputs[inputEmail].Value(),
-			FetchEmail:   m.inputs[inputFetchEmail].Value(),
-			SendAsEmail:  m.inputs[inputSendAsEmail].Value(),
-			CatchAll:     catchAll,
-			Password:     m.inputs[inputPassword].Value(),
-			IMAPServer:   m.inputs[inputIMAPServer].Value(),
-			IMAPPort:     imapPort,
-			SMTPServer:   m.inputs[inputSMTPServer].Value(),
-			SMTPPort:     smtpPort,
-			Insecure:     insecure,
-			AuthMethod:   authMethod,
-			JMAPEndpoint: m.inputs[inputJMAPEndpoint].Value(),
-			POP3Server:   m.inputs[inputPOP3Server].Value(),
-			POP3Port:     pop3Port,
-			MaildirPath:  m.inputs[inputMaildirPath].Value(),
+			Protocol:           proto,
+			Provider:           m.inputs[inputProvider].Value(),
+			Name:               m.inputs[inputName].Value(),
+			Host:               m.inputs[inputEmail].Value(),
+			FetchEmail:         m.inputs[inputFetchEmail].Value(),
+			SendAsEmail:        m.inputs[inputSendAsEmail].Value(),
+			CatchAll:           catchAll,
+			ExtraAddresses:     splitAddressList(m.inputs[inputExtraAddresses].Value()),
+			AlwaysShowMailFrom: splitAddressList(m.inputs[inputAlwaysShowMailFrom].Value()),
+			Password:           m.inputs[inputPassword].Value(),
+			IMAPServer:         m.inputs[inputIMAPServer].Value(),
+			IMAPPort:           imapPort,
+			SMTPServer:         m.inputs[inputSMTPServer].Value(),
+			SMTPPort:           smtpPort,
+			Insecure:           insecure,
+			AuthMethod:         authMethod,
+			JMAPEndpoint:       m.inputs[inputJMAPEndpoint].Value(),
+			POP3Server:         m.inputs[inputPOP3Server].Value(),
+			POP3Port:           pop3Port,
+			MaildirPath:        m.inputs[inputMaildirPath].Value(),
 		}
 	}
+}
+
+// splitAddressList splits a comma- or space-separated list of addresses or
+// domains, dropping empty entries.
+func splitAddressList(value string) []string {
+	return strings.FieldsFunc(value, func(r rune) bool {
+		return r == ',' || r == ';' || unicode.IsSpace(r)
+	})
 }
 
 // viewProtocolCombobox renders the protocol selector as a segmented combobox,
@@ -424,6 +445,8 @@ func (m *Login) protocolFieldViews(proto string) []string {
 		m.inputs[inputFetchEmail].View(),
 		m.inputs[inputSendAsEmail].View(),
 		m.inputs[inputCatchAll].View(),
+		m.inputs[inputExtraAddresses].View(),
+		m.inputs[inputAlwaysShowMailFrom].View(),
 	}
 
 	switch proto {
@@ -473,6 +496,8 @@ func (m *Login) imapFieldViews(common []string) []string {
 
 	if !m.useOAuth2 {
 		views = append(views, m.inputs[inputPassword].View())
+	} else if m.isEditMode {
+		views = append(views, accountEmailStyle.Render("OAuth2 sign-in is kept — press o in account settings to sign in again"))
 	} else {
 		views = append(views, accountEmailStyle.Render("OAuth2 selected — browser authorization will open after submit"))
 	}
@@ -535,6 +560,10 @@ func (m *Login) View() tea.View {
 		tip = "Type 'true' to disable TLS certificate verification (not recommended)."
 	case inputCatchAll:
 		tip = "Type 'true' to show all inbox messages regardless of To address (useful for catch-all domains)."
+	case inputExtraAddresses:
+		tip = "Other addresses that deliver to this mailbox, e.g. old addresses or aliases. Mail sent to them is shown too."
+	case inputAlwaysShowMailFrom:
+		tip = "Senders whose mail is shown even when it names none of your addresses (Bcc). Use an address or a domain, e.g. ee.duth.gr."
 	case inputJMAPEndpoint:
 		tip = "The JMAP session resource URL (e.g., https://api.fastmail.com/jmap/session)."
 	case inputPOP3Server:
@@ -571,25 +600,33 @@ func (m *Login) View() tea.View {
 }
 
 // SetEditMode sets the login form to edit an existing account.
-func (m *Login) SetEditMode(accountID, protocol, provider, name, email, fetchEmail, sendAsEmail, imapServer string, imapPort int, smtpServer string, smtpPort int, insecure bool, jmapEndpoint, pop3Server string, pop3Port int, catchAll bool, maildirPath string) {
+func (m *Login) SetEditMode(account GoToEditAccountMsg) {
 	m.isEditMode = true
-	m.accountID = accountID
+	m.accountID = account.AccountID
 
+	protocol := account.Protocol
 	if protocol == "" {
 		protocol = protocolIMAP
 	}
+	provider := account.Provider
+	imapServer, imapPort := account.IMAPServer, account.IMAPPort
+	smtpServer, smtpPort := account.SMTPServer, account.SMTPPort
+	insecure := account.Insecure
 	m.inputs[inputProtocol].SetValue(protocol)
 	m.inputs[inputProvider].SetValue(provider)
-	m.inputs[inputName].SetValue(name)
-	m.inputs[inputEmail].SetValue(email)
-	m.inputs[inputFetchEmail].SetValue(fetchEmail)
-	m.inputs[inputSendAsEmail].SetValue(sendAsEmail)
-	if catchAll {
+	m.inputs[inputName].SetValue(account.Name)
+	m.inputs[inputEmail].SetValue(account.Email)
+	m.inputs[inputFetchEmail].SetValue(account.FetchEmail)
+	m.inputs[inputSendAsEmail].SetValue(account.SendAsEmail)
+	if account.CatchAll {
 		m.inputs[inputCatchAll].SetValue("true")
 	} else {
 		m.inputs[inputCatchAll].SetValue("false")
 	}
-	m.showCustom = provider == "custom"
+	m.inputs[inputExtraAddresses].SetValue(strings.Join(account.ExtraAddresses, ", "))
+	m.inputs[inputAlwaysShowMailFrom].SetValue(strings.Join(account.AlwaysShowMailFrom, ", "))
+	m.inputs[inputAuthMethod].SetValue(account.AuthMethod)
+	m.updateFlags()
 
 	if m.showCustom {
 		m.inputs[inputIMAPServer].SetValue(imapServer)
@@ -607,14 +644,14 @@ func (m *Login) SetEditMode(accountID, protocol, provider, name, email, fetchEma
 		}
 	}
 
-	if jmapEndpoint != "" {
-		m.inputs[inputJMAPEndpoint].SetValue(jmapEndpoint)
+	if account.JMAPEndpoint != "" {
+		m.inputs[inputJMAPEndpoint].SetValue(account.JMAPEndpoint)
 	}
-	if pop3Server != "" {
-		m.inputs[inputPOP3Server].SetValue(pop3Server)
+	if account.POP3Server != "" {
+		m.inputs[inputPOP3Server].SetValue(account.POP3Server)
 	}
-	if pop3Port != 0 {
-		m.inputs[inputPOP3Port].SetValue(strconv.Itoa(pop3Port))
+	if account.POP3Port != 0 {
+		m.inputs[inputPOP3Port].SetValue(strconv.Itoa(account.POP3Port))
 	}
 	// Also set SMTP for POP3
 	if protocol == protocolPOP3 {
@@ -623,8 +660,8 @@ func (m *Login) SetEditMode(accountID, protocol, provider, name, email, fetchEma
 			m.inputs[inputSMTPPort].SetValue(strconv.Itoa(smtpPort))
 		}
 	}
-	if maildirPath != "" {
-		m.inputs[inputMaildirPath].SetValue(maildirPath)
+	if account.MaildirPath != "" {
+		m.inputs[inputMaildirPath].SetValue(account.MaildirPath)
 	}
 }
 

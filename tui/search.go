@@ -33,6 +33,16 @@ type LocalSearcher interface {
 	Syncing(folder string, accountIDs []string) bool
 }
 
+// SearchHistory saves the queries the user searched for, newest first.
+type SearchHistory interface {
+	Searches() ([]string, error)
+	// Add saves query as the newest search and returns the saved searches.
+	Add(query string) ([]string, error)
+	// Remove deletes query and returns the saved searches.
+	Remove(query string) ([]string, error)
+	Clear() error
+}
+
 type SearchOverlay struct {
 	input   textinput.Model
 	query   backend.SearchQuery
@@ -48,9 +58,14 @@ type SearchOverlay struct {
 	accountIDs []string
 	fromServer bool
 
-	// cursor is the highlighted result; firstShown is the first result in
-	// the visible window. resultsFocused means keys move the highlight
-	// instead of editing the query.
+	// history saves searches; nil when there is none. recent holds the saved
+	// searches, listed under the query while it is empty.
+	history SearchHistory
+	recent  []string
+
+	// cursor is the highlighted row of the list under the query (results, or
+	// recent searches); firstShown is the first row in the visible window.
+	// resultsFocused means keys move the highlight instead of editing the query.
 	cursor         int
 	firstShown     int
 	resultsFocused bool
@@ -76,6 +91,22 @@ func (o *SearchOverlay) UseLocalSearch(local LocalSearcher, folder string, accou
 	o.local, o.folder, o.accountIDs = local, folder, accountIDs
 }
 
+// UseSearchHistory lists the saved searches under the empty query and saves
+// new ones to history.
+func (o *SearchOverlay) UseSearchHistory(history SearchHistory) tea.Cmd {
+	o.history = history
+	recent, err := history.Searches()
+	if err != nil {
+		return notifyError(err)
+	}
+	o.recent = recent
+	return nil
+}
+
+func notifyError(err error) tea.Cmd {
+	return func() tea.Msg { return NotifyMsg{Message: err.Error()} }
+}
+
 func (o *SearchOverlay) Init() tea.Cmd { return textinput.Blink }
 
 func (o *SearchOverlay) Update(msg tea.Msg, mailbox MailboxKind, accountID string) tea.Cmd {
@@ -91,7 +122,7 @@ func (o *SearchOverlay) Update(msg tea.Msg, mailbox MailboxKind, accountID strin
 		o.loading, o.done = false, msg.Err == nil
 		o.query = msg.Query
 		if msg.Err != nil {
-			return func() tea.Msg { return NotifyMsg{Message: msg.Err.Error()} }
+			return notifyError(msg.Err)
 		}
 		o.results = msg.Emails
 		o.fromServer = true
@@ -114,7 +145,8 @@ func (o *SearchOverlay) Update(msg tea.Msg, mailbox MailboxKind, accountID strin
 			}
 			o.loading, o.done, o.results = true, false, nil
 			query := backend.ParseSearchQuery(raw)
-			return func() tea.Msg { return SearchRequestedMsg{Query: query, Mailbox: mailbox, AccountID: accountID} }
+			search := func() tea.Msg { return SearchRequestedMsg{Query: query, Mailbox: mailbox, AccountID: accountID} }
+			return tea.Batch(o.remember(raw), search)
 		}
 		if o.resultsFocused {
 			// Typing while the results are focused goes back to editing the query.
@@ -125,11 +157,28 @@ func (o *SearchOverlay) Update(msg tea.Msg, mailbox MailboxKind, accountID strin
 	before := o.input.Value()
 	var cmd tea.Cmd
 	o.input, cmd = o.input.Update(msg)
-	if o.input.Value() != before {
+	if after := o.input.Value(); after != before {
 		o.loading = false
+		if before == "" || after == "" {
+			// The list under the query switches between recent searches and results.
+			o.cursor, o.firstShown = 0, 0
+		}
 		o.searchLocally()
 	}
 	return cmd
+}
+
+// remember saves query as the newest recent search.
+func (o *SearchOverlay) remember(query string) tea.Cmd {
+	if o.history == nil {
+		return nil
+	}
+	recent, err := o.history.Add(query)
+	if err != nil {
+		return notifyError(err)
+	}
+	o.recent = recent
+	return nil
 }
 
 // searchLocally replaces the results with matches from the header copy.
@@ -165,10 +214,28 @@ func (o *SearchOverlay) RefreshLocal() {
 	o.firstShown = min(firstShown, o.cursor)
 }
 
-// handleResultKey moves the highlight or opens the highlighted result.
-// It reports false for keys that belong to the query input.
+// showingRecent reports whether the list under the query is the recent
+// searches, which happens while the query is empty.
+func (o *SearchOverlay) showingRecent() bool {
+	return o.input.Value() == "" && len(o.recent) > 0
+}
+
+// rowCount is how many rows the list under the query has.
+func (o *SearchOverlay) rowCount() int {
+	switch {
+	case o.showingRecent():
+		return len(o.recent)
+	case o.done:
+		return len(o.results)
+	}
+	return 0
+}
+
+// handleResultKey moves the highlight, opens the highlighted result or uses,
+// removes and clears recent searches. It reports false for keys that belong
+// to the query input.
 func (o *SearchOverlay) handleResultKey(key string) (tea.Cmd, bool) {
-	if !o.done || len(o.results) == 0 {
+	if o.rowCount() == 0 {
 		return nil, false
 	}
 	kb := config.Keybinds.Global
@@ -204,21 +271,29 @@ func (o *SearchOverlay) handleResultKey(key string) (tea.Cmd, bool) {
 		o.moveCursor(-1)
 		return nil, true
 	case keyEnter:
-		return o.openHighlighted(), true
+		return o.pickHighlighted(), true
+	}
+	if o.showingRecent() {
+		switch key {
+		case "d", "delete":
+			return o.removeRecent(), true
+		case "D":
+			return o.clearRecent(), true
+		}
 	}
 	return nil, false
 }
 
 // MoveHighlight moves the highlighted result by delta, e.g. for the mouse wheel.
 func (o *SearchOverlay) MoveHighlight(delta int) {
-	if o.done && len(o.results) > 0 {
+	if o.rowCount() > 0 {
 		o.focusResults()
 		o.moveCursor(delta)
 	}
 }
 
 // Click handles a left click on row y of the overlay: a click highlights a
-// result, a second click on the same result within 500 ms opens it.
+// result, a second click on the same result within 500 ms picks it.
 func (o *SearchOverlay) Click(y int) tea.Cmd {
 	index := o.resultAt(y)
 	if index < 0 {
@@ -230,20 +305,77 @@ func (o *SearchOverlay) Click(y int) tea.Cmd {
 	o.focusResults()
 	o.cursor = index
 	if doubleClick {
-		return o.openHighlighted()
+		return o.pickHighlighted()
 	}
 	return nil
 }
 
+// pickHighlighted opens the highlighted result, or uses the highlighted recent search.
+func (o *SearchOverlay) pickHighlighted() tea.Cmd {
+	if o.showingRecent() {
+		return o.useRecent()
+	}
+	return o.openHighlighted()
+}
+
 func (o *SearchOverlay) openHighlighted() tea.Cmd {
+	var remembered tea.Cmd
+	if !o.fromServer {
+		// Enter saved the server searches already; save a search answered by the copy here.
+		remembered = o.remember(o.input.Value())
+	}
 	results := append([]fetcher.Email(nil), o.results...)
 	open := results[o.cursor]
 	query := o.query
-	return func() tea.Msg { return ApplySearchResultsMsg{Query: query, Emails: results, Open: &open} }
+	apply := func() tea.Msg { return ApplySearchResultsMsg{Query: query, Emails: results, Open: &open} }
+	return tea.Batch(remembered, apply)
+}
+
+// useRecent puts the highlighted recent search in the query and searches the
+// copy on this computer; a second Enter searches the server.
+func (o *SearchOverlay) useRecent() tea.Cmd {
+	o.input.SetValue(o.recent[o.cursor])
+	o.input.CursorEnd()
+	o.cursor, o.firstShown = 0, 0
+	o.loading = false
+	o.focusInput()
+	o.searchLocally()
+	return textinput.Blink
+}
+
+func (o *SearchOverlay) removeRecent() tea.Cmd {
+	recent, err := o.history.Remove(o.recent[o.cursor])
+	if err != nil {
+		return notifyError(err)
+	}
+	o.recent = recent
+	return o.keepHighlightInRecent()
+}
+
+func (o *SearchOverlay) clearRecent() tea.Cmd {
+	if err := o.history.Clear(); err != nil {
+		return notifyError(err)
+	}
+	o.recent = nil
+	return o.keepHighlightInRecent()
+}
+
+// keepHighlightInRecent moves the highlight onto a remaining recent search,
+// or back to the query when none are left.
+func (o *SearchOverlay) keepHighlightInRecent() tea.Cmd {
+	if len(o.recent) == 0 {
+		o.cursor, o.firstShown = 0, 0
+		o.focusInput()
+		return textinput.Blink
+	}
+	o.cursor = min(o.cursor, len(o.recent)-1)
+	o.firstShown = max(0, min(o.firstShown, o.cursor, len(o.recent)-searchResultRows))
+	return nil
 }
 
 func (o *SearchOverlay) moveCursor(delta int) {
-	o.cursor = (o.cursor + delta + len(o.results)) % len(o.results)
+	count := o.rowCount()
+	o.cursor = (o.cursor + delta + count) % count
 	if o.cursor < o.firstShown {
 		o.firstShown = o.cursor
 	} else if o.cursor >= o.firstShown+searchResultRows {
@@ -279,6 +411,8 @@ func (o *SearchOverlay) statusLines() []string {
 	switch {
 	case o.loading:
 		return []string{"Searching the server..."}
+	case o.showingRecent():
+		return o.recentStatusLines()
 	case o.fromServer && o.done:
 		lines := []string{fmt.Sprintf("%d result(s) from the server.", len(o.results))}
 		if len(o.results) > 0 {
@@ -291,10 +425,7 @@ func (o *SearchOverlay) statusLines() []string {
 		}
 		return []string{"Enter to search the server, Esc to close."}
 	}
-	copied := fmt.Sprintf("%d emails of %s copied to this computer", o.local.Count(o.folder, o.accountIDs), o.folder)
-	if o.local.Syncing(o.folder, o.accountIDs) {
-		copied += ", updating"
-	}
+	copied := o.copiedText()
 	switch {
 	case o.input.Value() == "":
 		return []string{
@@ -312,6 +443,30 @@ func (o *SearchOverlay) statusLines() []string {
 	return []string{fmt.Sprintf("%d match(es) on this computer (%s).", len(o.results), copied), pick}
 }
 
+// recentStatusLines tells the keys for the recent searches list.
+func (o *SearchOverlay) recentStatusLines() []string {
+	if o.resultsFocused {
+		return []string{
+			"j/k or ↑/↓ to pick, Enter to use the search, Tab to type, Esc to close.",
+			"d or Delete removes the highlighted search, D clears all recent searches.",
+		}
+	}
+	typing := "Type a search, then Enter searches the server."
+	if o.local != nil {
+		typing = "Type to search senders, recipients and subjects (" + o.copiedText() + ")."
+	}
+	return []string{typing, "↓ or Tab to pick a recent search. Esc to close."}
+}
+
+// copiedText says how much of the folder is copied to this computer.
+func (o *SearchOverlay) copiedText() string {
+	copied := fmt.Sprintf("%d emails of %s copied to this computer", o.local.Count(o.folder, o.accountIDs), o.folder)
+	if o.local.Syncing(o.folder, o.accountIDs) {
+		copied += ", updating"
+	}
+	return copied
+}
+
 // textAboveResults is the overlay text drawn before the first result row.
 // Every line fits the box, so the row count matches what is drawn.
 func (o *SearchOverlay) textAboveResults() string {
@@ -323,7 +478,10 @@ func (o *SearchOverlay) textAboveResults() string {
 		for _, line := range lines {
 			content += "\n" + ansi.Truncate(line, textWidth, "…")
 		}
-		if o.done {
+		switch {
+		case o.showingRecent():
+			content += "\n\nRecent searches\n"
+		case o.done:
 			content += "\n"
 		}
 	}
@@ -338,39 +496,48 @@ func (o *SearchOverlay) textWidth() int {
 
 func (o *SearchOverlay) View() string {
 	content := o.textAboveResults()
-	if o.done {
-		content += o.resultsView()
+	switch {
+	case o.showingRecent():
+		content += o.rowsView(func(i int) string { return o.recent[i] })
+	case o.done:
+		content += o.rowsView(func(i int) string {
+			email := o.results[i]
+			return fmt.Sprintf("%d. %s - %s", i+1, parseSenderName(email.From), email.Subject)
+		})
 	}
 	return o.boxStyle().Render(content)
 }
 
-// resultAt returns the result drawn on row y of View, or -1.
+// resultAt returns the row of the list under the query drawn on row y of
+// View, or -1.
 func (o *SearchOverlay) resultAt(y int) int {
-	if !o.done {
+	count := o.rowCount()
+	if count == 0 {
 		return -1
 	}
 	style := o.boxStyle()
 	row := y - style.GetBorderTopSize() - style.GetPaddingTop() - strings.Count(o.textAboveResults(), "\n")
-	shown := min(searchResultRows, len(o.results)-o.firstShown)
+	shown := min(searchResultRows, count-o.firstShown)
 	if row < 0 || row >= shown {
 		return -1
 	}
 	return o.firstShown + row
 }
 
-func (o *SearchOverlay) resultsView() string {
+// rowsView draws the visible window of the list under the query, one line
+// per row with label giving the text of row i.
+func (o *SearchOverlay) rowsView(label func(i int) string) string {
 	textWidth := o.textWidth()
 	highlight := lipgloss.NewStyle().Foreground(theme.ActiveTheme.Accent).Bold(true)
-	last := min(o.firstShown+searchResultRows, len(o.results))
+	last := min(o.firstShown+searchResultRows, o.rowCount())
 	var b strings.Builder
 	for i := o.firstShown; i < last; i++ {
-		email := o.results[i]
 		marker := "  "
 		if i == o.cursor {
 			marker = "> "
 		}
-		// One row per result keeps clicks mapped to the right email.
-		line := ansi.Truncate(fmt.Sprintf("%s%d. %s - %s", marker, i+1, parseSenderName(email.From), email.Subject), textWidth, "…")
+		// One line per row keeps clicks mapped to the right row.
+		line := ansi.Truncate(marker+label(i), textWidth, "…")
 		if i == o.cursor && o.resultsFocused {
 			line = highlight.Render(line)
 		}

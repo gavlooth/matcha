@@ -89,7 +89,7 @@ func (x *Index) Load(accountID, folder string) {
 		log.Printf("header index: starting %s of %s over: %v", folder, accountID, err)
 		saved = &config.HeaderIndex{}
 	}
-	headers := fetcher.FolderHeaders{UIDValidity: saved.UIDValidity, OtherUIDs: saved.OtherUIDs}
+	headers := fetcher.FolderHeaders{UIDValidity: saved.UIDValidity, AddressSettings: saved.AddressSettings, OtherUIDs: saved.OtherUIDs}
 	for _, cached := range saved.Emails {
 		headers.Emails = append(headers.Emails, emailFromCache(cached))
 	}
@@ -156,7 +156,7 @@ func (x *Index) SyncStep(account *config.Account, folder string, maxNew int) (in
 	if run.scanned {
 		updated, missing, err = fetcher.FetchMissingHeaders(account, folder, known, run.missing, maxNew)
 	}
-	if !run.scanned || errors.Is(err, fetcher.ErrFolderUIDsChanged) {
+	if !run.scanned || errors.Is(err, fetcher.ErrFolderNeedsNewScan) {
 		updated, missing, err = fetcher.SyncFolderHeaders(account, folder, known, maxNew)
 		run.steps = 0
 	}
@@ -168,7 +168,7 @@ func (x *Index) SyncStep(account *config.Account, folder string, maxNew int) (in
 	run.steps++
 
 	if firstStep || len(missing) == 0 || run.steps%saveEverySteps == 0 {
-		saved := &config.HeaderIndex{UIDValidity: updated.UIDValidity, OtherUIDs: updated.OtherUIDs}
+		saved := &config.HeaderIndex{UIDValidity: updated.UIDValidity, AddressSettings: updated.AddressSettings, OtherUIDs: updated.OtherUIDs}
 		for _, email := range updated.Emails {
 			saved.Emails = append(saved.Emails, emailToCache(email))
 		}

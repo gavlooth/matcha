@@ -823,16 +823,10 @@ func (m *Model) updateConfigFromCredentials(msg tui.Credentials) {
 
 	if login, ok := m.current.(*tui.Login); ok && login.IsEditMode() {
 		existingID := login.GetAccountID()
-		account := buildAccount(existingID, msg, fetchEmails[0])
+		edited := buildAccount(existingID, msg, fetchEmails[0])
 		for i, acc := range m.config.Accounts {
 			if acc.ID == existingID {
-				account.SMIMECert = acc.SMIMECert
-				account.SMIMEKey = acc.SMIMEKey
-				account.SMIMESignByDefault = acc.SMIMESignByDefault
-				if account.Password == "" {
-					account.Password = acc.Password
-				}
-				m.config.Accounts[i] = account
+				m.config.Accounts[i] = withEditedFields(acc, edited)
 				break
 			}
 		}
@@ -844,24 +838,55 @@ func (m *Model) updateConfigFromCredentials(msg tui.Credentials) {
 	}
 }
 
+// withEditedFields returns existing with the fields the account form shows
+// taken from edited. Settings the form does not show, such as S/MIME and PGP
+// keys or the OAuth2 token and password commands, stay as they were.
+func withEditedFields(existing, edited config.Account) config.Account {
+	existing.Name = edited.Name
+	existing.Email = edited.Email
+	existing.ServiceProvider = edited.ServiceProvider
+	existing.FetchEmail = edited.FetchEmail
+	existing.SendAsEmail = edited.SendAsEmail
+	existing.CatchAll = edited.CatchAll
+	existing.ExtraAddresses = edited.ExtraAddresses
+	existing.AlwaysShowMailFrom = edited.AlwaysShowMailFrom
+	existing.AuthMethod = edited.AuthMethod
+	existing.Protocol = edited.Protocol
+	existing.Insecure = edited.Insecure
+	existing.JMAPEndpoint = edited.JMAPEndpoint
+	existing.POP3Server = edited.POP3Server
+	existing.POP3Port = edited.POP3Port
+	existing.MaildirPath = edited.MaildirPath
+	existing.IMAPServer = edited.IMAPServer
+	existing.IMAPPort = edited.IMAPPort
+	existing.SMTPServer = edited.SMTPServer
+	existing.SMTPPort = edited.SMTPPort
+	if edited.Password != "" {
+		existing.Password = edited.Password
+	}
+	return existing
+}
+
 func buildAccount(id string, msg tui.Credentials, fetchEmail string) config.Account {
 	account := config.Account{
-		ID:              id,
-		Name:            msg.Name,
-		Email:           msg.Host,
-		Password:        msg.Password,
-		ServiceProvider: msg.Provider,
-		FetchEmail:      fetchEmail,
-		SendAsEmail:     msg.SendAsEmail,
-		CatchAll:        msg.CatchAll,
-		AuthMethod:      msg.AuthMethod,
-		Protocol:        msg.Protocol,
-		Insecure:        msg.Insecure,
-		JMAPEndpoint:    msg.JMAPEndpoint,
-		POP3Server:      msg.POP3Server,
-		POP3Port:        msg.POP3Port,
-		MaildirPath:     msg.MaildirPath,
-		SC:              &config.SessionCache{},
+		ID:                 id,
+		Name:               msg.Name,
+		Email:              msg.Host,
+		Password:           msg.Password,
+		ServiceProvider:    msg.Provider,
+		FetchEmail:         fetchEmail,
+		SendAsEmail:        msg.SendAsEmail,
+		CatchAll:           msg.CatchAll,
+		ExtraAddresses:     msg.ExtraAddresses,
+		AlwaysShowMailFrom: msg.AlwaysShowMailFrom,
+		AuthMethod:         msg.AuthMethod,
+		Protocol:           msg.Protocol,
+		Insecure:           msg.Insecure,
+		JMAPEndpoint:       msg.JMAPEndpoint,
+		POP3Server:         msg.POP3Server,
+		POP3Port:           msg.POP3Port,
+		MaildirPath:        msg.MaildirPath,
+		SC:                 &config.SessionCache{},
 	}
 	if msg.Provider == "custom" || msg.Protocol == "pop3" {
 		account.IMAPServer = msg.IMAPServer
@@ -1183,6 +1208,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 		m.folderInbox = tui.NewFolderInbox(cachedFolders, m.config.Accounts)
 		m.folderInbox.SetFolderData(cachedFolders, unread, foldersByAccount, unreadByAccount)
 		m.folderInbox.GetInbox().SetLocalSearcher(m.headerIndex)
+		m.folderInbox.GetInbox().SetSearchHistory(config.SearchHistoryFile{})
 		m.setFolderInboxDefaults()
 		m.loadFolderInboxCache(emailstore.FolderInbox)
 		m.current = m.folderInbox
@@ -1753,7 +1779,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 			hideTips = m.config.HideTips
 		}
 		login := tui.NewLogin(hideTips)
-		login.SetEditMode(msg.AccountID, msg.Protocol, msg.Provider, msg.Name, msg.Email, msg.FetchEmail, msg.SendAsEmail, msg.IMAPServer, msg.IMAPPort, msg.SMTPServer, msg.SMTPPort, msg.Insecure, msg.JMAPEndpoint, msg.POP3Server, msg.POP3Port, msg.CatchAll, msg.MaildirPath)
+		login.SetEditMode(msg)
 		m.current = login
 		m.updateCurrentWindowSize()
 		return m, m.current.Init()
@@ -2107,6 +2133,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 				selfAddrs[strings.ToLower(acc.Email)] = true
 				selfAddrs[strings.ToLower(acc.GetFetchEmail())] = true
 				selfAddrs[strings.ToLower(acc.GetSendAsEmail())] = true
+				for _, extra := range acc.ExtraAddresses {
+					selfAddrs[strings.ToLower(strings.TrimSpace(extra))] = true
+				}
 			}
 			// For catch-all accounts, also exclude the delivery address
 			accountID := msg.Email.AccountID

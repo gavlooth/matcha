@@ -58,6 +58,7 @@ var cacheFiles = []string{
 	"drafts.json",
 	"folder_cache.json",
 	"mail_rules_progress.json",
+	searchHistoryFileName,
 }
 
 var cacheDirectories = []string{
@@ -87,6 +88,15 @@ type Account struct {
 	// CatchAll skips per-address filtering so all inbox messages are shown,
 	// regardless of which address they were delivered to.
 	CatchAll bool `json:"catch_all,omitempty"`
+	// ExtraAddresses are more addresses that deliver to this account, such as
+	// aliases or older addresses. Mail sent to any of them is shown like mail
+	// sent to FetchEmail.
+	ExtraAddresses []string `json:"extra_addresses,omitempty"`
+	// AlwaysShowMailFrom lists senders whose mail is shown even when it names
+	// none of the account's addresses, for example mail that lists the account
+	// only in Bcc. An entry is an address ("prof@uni.edu") or a domain
+	// ("uni.edu", which also covers its subdomains).
+	AlwaysShowMailFrom []string `json:"always_show_mail_from,omitempty"`
 
 	SC *SessionCache `json:"-"` // "-" prevents the SessionCache from being saved to config.json
 
@@ -621,37 +631,39 @@ func configFile() (string, error) {
 
 // secureDiskAccount includes the Password field in JSON when secure mode is active.
 type secureDiskAccount struct {
-	ID                 string `json:"id"`
-	Name               string `json:"name"`
-	Email              string `json:"email"`
-	Password           string `json:"password,omitempty"`
-	ServiceProvider    string `json:"service_provider"`
-	FetchEmail         string `json:"fetch_email,omitempty"`
-	SendAsEmail        string `json:"send_as_email,omitempty"`
-	IMAPServer         string `json:"imap_server,omitempty"`
-	IMAPPort           int    `json:"imap_port,omitempty"`
-	SMTPServer         string `json:"smtp_server,omitempty"`
-	SMTPPort           int    `json:"smtp_port,omitempty"`
-	Insecure           bool   `json:"insecure,omitempty"`
-	SMTPUsername       string `json:"smtp_username,omitempty"`
-	SMTPPassword       string `json:"smtp_password,omitempty"`
-	SMIMECert          string `json:"smime_cert,omitempty"`
-	SMIMEKey           string `json:"smime_key,omitempty"`
-	SMIMESignByDefault bool   `json:"smime_sign_by_default,omitempty"`
-	PGPPublicKey       string `json:"pgp_public_key,omitempty"`
-	PGPPrivateKey      string `json:"pgp_private_key,omitempty"`
-	PGPKeySource       string `json:"pgp_key_source,omitempty"`
-	PGPPIN             string `json:"pgp_pin,omitempty"`
-	PGPSignByDefault   bool   `json:"pgp_sign_by_default,omitempty"`
-	AuthMethod         string `json:"auth_method,omitempty"`
-	OAuthTokenCmd      string `json:"oauth_token_cmd,omitempty"`
-	PassCmd            string `json:"pass_cmd,omitempty"`
-	Protocol           string `json:"protocol,omitempty"`
-	JMAPEndpoint       string `json:"jmap_endpoint,omitempty"`
-	POP3Server         string `json:"pop3_server,omitempty"`
-	POP3Port           int    `json:"pop3_port,omitempty"`
-	MaildirPath        string `json:"maildir_path,omitempty"`
-	CatchAll           bool   `json:"catch_all,omitempty"`
+	ID                 string   `json:"id"`
+	Name               string   `json:"name"`
+	Email              string   `json:"email"`
+	Password           string   `json:"password,omitempty"`
+	ServiceProvider    string   `json:"service_provider"`
+	FetchEmail         string   `json:"fetch_email,omitempty"`
+	SendAsEmail        string   `json:"send_as_email,omitempty"`
+	IMAPServer         string   `json:"imap_server,omitempty"`
+	IMAPPort           int      `json:"imap_port,omitempty"`
+	SMTPServer         string   `json:"smtp_server,omitempty"`
+	SMTPPort           int      `json:"smtp_port,omitempty"`
+	Insecure           bool     `json:"insecure,omitempty"`
+	SMTPUsername       string   `json:"smtp_username,omitempty"`
+	SMTPPassword       string   `json:"smtp_password,omitempty"`
+	SMIMECert          string   `json:"smime_cert,omitempty"`
+	SMIMEKey           string   `json:"smime_key,omitempty"`
+	SMIMESignByDefault bool     `json:"smime_sign_by_default,omitempty"`
+	PGPPublicKey       string   `json:"pgp_public_key,omitempty"`
+	PGPPrivateKey      string   `json:"pgp_private_key,omitempty"`
+	PGPKeySource       string   `json:"pgp_key_source,omitempty"`
+	PGPPIN             string   `json:"pgp_pin,omitempty"`
+	PGPSignByDefault   bool     `json:"pgp_sign_by_default,omitempty"`
+	AuthMethod         string   `json:"auth_method,omitempty"`
+	OAuthTokenCmd      string   `json:"oauth_token_cmd,omitempty"`
+	PassCmd            string   `json:"pass_cmd,omitempty"`
+	Protocol           string   `json:"protocol,omitempty"`
+	JMAPEndpoint       string   `json:"jmap_endpoint,omitempty"`
+	POP3Server         string   `json:"pop3_server,omitempty"`
+	POP3Port           int      `json:"pop3_port,omitempty"`
+	MaildirPath        string   `json:"maildir_path,omitempty"`
+	CatchAll           bool     `json:"catch_all,omitempty"`
+	ExtraAddresses     []string `json:"extra_addresses,omitempty"`
+	AlwaysShowMailFrom []string `json:"always_show_mail_from,omitempty"`
 }
 
 type secureDiskConfig struct {
@@ -782,6 +794,8 @@ func SaveConfig(config *Config) error {
 				POP3Port:           acc.POP3Port,
 				MaildirPath:        acc.MaildirPath,
 				CatchAll:           acc.CatchAll,
+				ExtraAddresses:     acc.ExtraAddresses,
+				AlwaysShowMailFrom: acc.AlwaysShowMailFrom,
 			})
 		}
 		data, err = json.MarshalIndent(sdc, "", "  ")
@@ -818,37 +832,39 @@ func LoadConfig() (*Config, error) {
 	var needsMigration bool
 
 	type rawAccount struct {
-		ID                 string `json:"id"`
-		Name               string `json:"name"`
-		Email              string `json:"email"`
-		Password           string `json:"password,omitempty"`
-		ServiceProvider    string `json:"service_provider"`
-		FetchEmail         string `json:"fetch_email,omitempty"`
-		SendAsEmail        string `json:"send_as_email,omitempty"`
-		IMAPServer         string `json:"imap_server,omitempty"`
-		IMAPPort           int    `json:"imap_port,omitempty"`
-		SMTPServer         string `json:"smtp_server,omitempty"`
-		SMTPPort           int    `json:"smtp_port,omitempty"`
-		Insecure           bool   `json:"insecure,omitempty"`
-		SMTPUsername       string `json:"smtp_username,omitempty"`
-		SMTPPassword       string `json:"smtp_password,omitempty"`
-		SMIMECert          string `json:"smime_cert,omitempty"`
-		SMIMEKey           string `json:"smime_key,omitempty"`
-		SMIMESignByDefault bool   `json:"smime_sign_by_default,omitempty"`
-		PGPPublicKey       string `json:"pgp_public_key,omitempty"`
-		PGPPrivateKey      string `json:"pgp_private_key,omitempty"`
-		PGPKeySource       string `json:"pgp_key_source,omitempty"`
-		PGPPIN             string `json:"pgp_pin,omitempty"`
-		PGPSignByDefault   bool   `json:"pgp_sign_by_default,omitempty"`
-		AuthMethod         string `json:"auth_method,omitempty"`
-		OAuthTokenCmd      string `json:"oauth_token_cmd,omitempty"`
-		PassCmd            string `json:"pass_cmd,omitempty"`
-		Protocol           string `json:"protocol,omitempty"`
-		JMAPEndpoint       string `json:"jmap_endpoint,omitempty"`
-		POP3Server         string `json:"pop3_server,omitempty"`
-		POP3Port           int    `json:"pop3_port,omitempty"`
-		MaildirPath        string `json:"maildir_path,omitempty"`
-		CatchAll           bool   `json:"catch_all,omitempty"`
+		ID                 string   `json:"id"`
+		Name               string   `json:"name"`
+		Email              string   `json:"email"`
+		Password           string   `json:"password,omitempty"`
+		ServiceProvider    string   `json:"service_provider"`
+		FetchEmail         string   `json:"fetch_email,omitempty"`
+		SendAsEmail        string   `json:"send_as_email,omitempty"`
+		IMAPServer         string   `json:"imap_server,omitempty"`
+		IMAPPort           int      `json:"imap_port,omitempty"`
+		SMTPServer         string   `json:"smtp_server,omitempty"`
+		SMTPPort           int      `json:"smtp_port,omitempty"`
+		Insecure           bool     `json:"insecure,omitempty"`
+		SMTPUsername       string   `json:"smtp_username,omitempty"`
+		SMTPPassword       string   `json:"smtp_password,omitempty"`
+		SMIMECert          string   `json:"smime_cert,omitempty"`
+		SMIMEKey           string   `json:"smime_key,omitempty"`
+		SMIMESignByDefault bool     `json:"smime_sign_by_default,omitempty"`
+		PGPPublicKey       string   `json:"pgp_public_key,omitempty"`
+		PGPPrivateKey      string   `json:"pgp_private_key,omitempty"`
+		PGPKeySource       string   `json:"pgp_key_source,omitempty"`
+		PGPPIN             string   `json:"pgp_pin,omitempty"`
+		PGPSignByDefault   bool     `json:"pgp_sign_by_default,omitempty"`
+		AuthMethod         string   `json:"auth_method,omitempty"`
+		OAuthTokenCmd      string   `json:"oauth_token_cmd,omitempty"`
+		PassCmd            string   `json:"pass_cmd,omitempty"`
+		Protocol           string   `json:"protocol,omitempty"`
+		JMAPEndpoint       string   `json:"jmap_endpoint,omitempty"`
+		POP3Server         string   `json:"pop3_server,omitempty"`
+		POP3Port           int      `json:"pop3_port,omitempty"`
+		MaildirPath        string   `json:"maildir_path,omitempty"`
+		CatchAll           bool     `json:"catch_all,omitempty"`
+		ExtraAddresses     []string `json:"extra_addresses,omitempty"`
+		AlwaysShowMailFrom []string `json:"always_show_mail_from,omitempty"`
 	}
 	type diskConfig struct {
 		Accounts                []rawAccount                      `json:"accounts"`
@@ -957,6 +973,8 @@ func LoadConfig() (*Config, error) {
 			POP3Port:           rawAcc.POP3Port,
 			MaildirPath:        rawAcc.MaildirPath,
 			CatchAll:           rawAcc.CatchAll,
+			ExtraAddresses:     rawAcc.ExtraAddresses,
+			AlwaysShowMailFrom: rawAcc.AlwaysShowMailFrom,
 			SC:                 &SessionCache{},
 		}
 

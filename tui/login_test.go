@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -118,5 +119,35 @@ func TestSubmitFormPortValidation(t *testing.T) {
 				t.Errorf("IMAPPort for input %q = %d, want %d", tt.portVal, msg.IMAPPort, tt.want)
 			}
 		})
+	}
+}
+
+func TestEditingAccountKeepsSignInAndAddressSettings(t *testing.T) {
+	for _, account := range []GoToEditAccountMsg{
+		{AccountID: "outlook", Provider: "outlook", Email: "me@outlook.com", AuthMethod: "oauth2"},
+		// Yahoo is set up as a custom provider that signs in with OAuth2; the
+		// form has no auth field for custom providers.
+		{AccountID: "yahoo", Provider: "custom", Email: "me@yahoo.gr", AuthMethod: "oauth2", IMAPServer: "imap.mail.yahoo.com", IMAPPort: 993},
+	} {
+		t.Run(account.AccountID, func(t *testing.T) {
+			account.ExtraAddresses = []string{"old@outlook.com", "older@outlook.com"}
+			account.AlwaysShowMailFrom = []string{"ee.duth.gr"}
+			m := NewLogin(true)
+			m.SetEditMode(account)
+			got := m.submitForm()().(Credentials)
+			if got.AuthMethod != "oauth2" {
+				t.Errorf("AuthMethod = %q, want oauth2: saving the form must not turn the account into a password account", got.AuthMethod)
+			}
+			if !slices.Equal(got.ExtraAddresses, account.ExtraAddresses) || !slices.Equal(got.AlwaysShowMailFrom, account.AlwaysShowMailFrom) {
+				t.Errorf("address settings = %v / %v, want %v / %v", got.ExtraAddresses, got.AlwaysShowMailFrom, account.ExtraAddresses, account.AlwaysShowMailFrom)
+			}
+		})
+	}
+}
+
+func TestSplitAddressList(t *testing.T) {
+	got := splitAddressList(" a@x.com, b@y.com;c.org\td@z.com,, ")
+	if want := []string{"a@x.com", "b@y.com", "c.org", "d@z.com"}; !slices.Equal(got, want) {
+		t.Errorf("splitAddressList = %q, want %q", got, want)
 	}
 }

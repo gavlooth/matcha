@@ -67,6 +67,8 @@ Visual mode allows you to select multiple emails and perform batch operations, s
 
 In the result list, `↓` or `Tab` moves to the results, `j/k` or `↑/↓` pick one, `Enter` opens it, and `Tab` goes back to the query. A click picks a result and a double click opens it.
 
+While the query is empty, the box lists your recent searches, newest first. Matcha saves a search when you press `Enter` to search the server, and when you open a result found while typing. It keeps the last 50; searching the same query again moves it to the top. Pick a recent search like a result (`↓` or `Tab`, then `j/k` or `↑/↓`, or a click and a second click): `Enter` puts it in the query and shows the matches on this computer, and a second `Enter` searches the server. `d` or `Delete` removes the highlighted search, `D` removes all of them. Recent searches are stored in `~/.cache/matcha/search_history.json` and follow Matcha's encryption setting.
+
 Both searches accept plain words and `key:value` filters. Wrap values with spaces in quotes, e.g. `subject:"quarterly report"`.
 
 - Plain words - match the sender, recipients or subject (the server also matches the body)

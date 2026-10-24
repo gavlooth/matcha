@@ -344,6 +344,7 @@ type Inbox struct {
 	pluginKeyBindings    []PluginKeyBinding
 	searchOverlay        *SearchOverlay
 	localSearcher        LocalSearcher // header copy on this computer; nil when none
+	searchHistory        SearchHistory // recent searches saved on this computer; nil when not saved
 	searchActive         bool
 	searchQuery          string
 	searchResults        []fetcher.Email
@@ -1035,12 +1036,16 @@ func (m *Inbox) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 		switch keypress := msg.String(); keypress {
 		case searchBinding:
 			m.searchOverlay = NewSearchOverlay(m.width, m.height)
-			if m.localSearcher == nil || m.folderName == "" {
-				return m, m.searchOverlay.Init()
+			cmds := []tea.Cmd{m.searchOverlay.Init()}
+			if m.searchHistory != nil {
+				cmds = append(cmds, m.searchOverlay.UseSearchHistory(m.searchHistory))
 			}
-			m.searchOverlay.UseLocalSearch(m.localSearcher, m.folderName, m.searchAccountIDs())
-			opened := SearchOpenedMsg{FolderName: m.folderName, AccountID: m.currentAccountID}
-			return m, tea.Batch(m.searchOverlay.Init(), func() tea.Msg { return opened })
+			if m.localSearcher != nil && m.folderName != "" {
+				m.searchOverlay.UseLocalSearch(m.localSearcher, m.folderName, m.searchAccountIDs())
+				opened := SearchOpenedMsg{FolderName: m.folderName, AccountID: m.currentAccountID}
+				cmds = append(cmds, func() tea.Msg { return opened })
+			}
+			return m, tea.Batch(cmds...)
 		case m.toggleThreadedKey():
 			m.toggleThreaded()
 			m.updateList()
@@ -1672,6 +1677,11 @@ func (m *Inbox) IsSearchActive() bool {
 // SetLocalSearcher gives the search box the header copy on this computer.
 func (m *Inbox) SetLocalSearcher(local LocalSearcher) {
 	m.localSearcher = local
+}
+
+// SetSearchHistory gives the search box the saved recent searches.
+func (m *Inbox) SetSearchHistory(history SearchHistory) {
+	m.searchHistory = history
 }
 
 // searchAccountIDs returns the accounts the open tab shows: one account, or

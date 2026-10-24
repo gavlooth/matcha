@@ -51,23 +51,26 @@ func (m *Settings) updateAccounts(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			acc := m.cfg.Accounts[m.accountsCursor]
 			return m, func() tea.Msg {
 				return GoToEditAccountMsg{
-					AccountID:    acc.ID,
-					Provider:     acc.ServiceProvider,
-					Name:         acc.Name,
-					Email:        acc.Email,
-					FetchEmail:   acc.FetchEmail,
-					SendAsEmail:  acc.SendAsEmail,
-					CatchAll:     acc.CatchAll,
-					IMAPServer:   acc.IMAPServer,
-					IMAPPort:     acc.IMAPPort,
-					SMTPServer:   acc.SMTPServer,
-					SMTPPort:     acc.SMTPPort,
-					Insecure:     acc.Insecure,
-					Protocol:     acc.Protocol,
-					JMAPEndpoint: acc.JMAPEndpoint,
-					POP3Server:   acc.POP3Server,
-					POP3Port:     acc.POP3Port,
-					MaildirPath:  acc.MaildirPath,
+					AccountID:          acc.ID,
+					Provider:           acc.ServiceProvider,
+					Name:               acc.Name,
+					Email:              acc.Email,
+					FetchEmail:         acc.FetchEmail,
+					SendAsEmail:        acc.SendAsEmail,
+					CatchAll:           acc.CatchAll,
+					ExtraAddresses:     acc.ExtraAddresses,
+					AlwaysShowMailFrom: acc.AlwaysShowMailFrom,
+					AuthMethod:         acc.AuthMethod,
+					IMAPServer:         acc.IMAPServer,
+					IMAPPort:           acc.IMAPPort,
+					SMTPServer:         acc.SMTPServer,
+					SMTPPort:           acc.SMTPPort,
+					Insecure:           acc.Insecure,
+					Protocol:           acc.Protocol,
+					JMAPEndpoint:       acc.JMAPEndpoint,
+					POP3Server:         acc.POP3Server,
+					POP3Port:           acc.POP3Port,
+					MaildirPath:        acc.MaildirPath,
 				}
 			}
 		}
@@ -154,6 +157,12 @@ func (m *Settings) viewAccounts() string {
 		}
 		if account.CatchAll {
 			providerInfo += " [Catch-All]"
+		}
+		if n := len(account.ExtraAddresses); n > 0 {
+			providerInfo += fmt.Sprintf(" [+%d addresses]", n)
+		}
+		if n := len(account.AlwaysShowMailFrom); n > 0 {
+			providerInfo += fmt.Sprintf(" [always shows %d senders]", n)
 		}
 
 		line := fmt.Sprintf("%s - %s", displayName, accountEmailStyle.Render(providerInfo))

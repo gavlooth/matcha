@@ -159,43 +159,20 @@ func normalizeGmailAddress(addr string) string {
 	return local + domain
 }
 
-// addressMatches reports whether candidate matches the configured fetch email.
+// addressMatches reports whether candidate is the configured address own.
 // For Gmail accounts, subaddressed forms ("local+tag@gmail.com") and dotted
 // forms ("l.o.c.a.l@gmail.com") also match.
-// fetchEmail must already be lowercased and trimmed.
-func addressMatches(candidate, fetchEmail string, account *config.Account) bool {
+// own must already be lowercased and trimmed.
+func addressMatches(candidate, own string, account *config.Account) bool {
 	candidate = strings.ToLower(strings.TrimSpace(candidate))
-	if candidate == "" || fetchEmail == "" {
+	if candidate == "" || own == "" {
 		return false
 	}
-	if candidate == fetchEmail {
+	if candidate == own {
 		return true
 	}
-	if account != nil && strings.EqualFold(account.ServiceProvider, "gmail") {
-		return normalizeGmailAddress(candidate) == normalizeGmailAddress(fetchEmail)
-	}
-	return false
-}
-
-// deliveryHeadersMatch checks if any of the Delivered-To, X-Forwarded-To, or
-// X-Original-To headers contain the given email address. This catches
-// auto-forwarded emails where the envelope To/Cc don't match the local account.
-func deliveryHeadersMatch(data []byte, fetchEmail string, account *config.Account) bool {
-	if len(data) == 0 {
-		return false
-	}
-	// Parse as MIME headers
-	reader := textproto.NewReader(bufio.NewReader(bytes.NewReader(data)))
-	headers, err := reader.ReadMIMEHeader()
-	if err != nil && len(headers) == 0 {
-		return false
-	}
-	for _, key := range []string{"Delivered-To", "X-Forwarded-To", "X-Original-To"} {
-		for _, val := range headers.Values(key) {
-			if addressMatches(val, fetchEmail, account) {
-				return true
-			}
-		}
+	if isGmailAccount(account) {
+		return normalizeGmailAddress(candidate) == normalizeGmailAddress(own)
 	}
 	return false
 }
@@ -508,17 +485,9 @@ func getMailboxByAttr(c *imapclient.Client, attr imap.MailboxAttr) (string, erro
 func buildDeliveryHeaderSection() *imap.FetchItemBodySection {
 	return &imap.FetchItemBodySection{
 		Specifier:    imap.PartSpecifierHeader,
-		HeaderFields: []string{"Delivered-To", "X-Forwarded-To", "X-Original-To", "References"},
+		HeaderFields: append(slices.Clone(deliveryHeaderNames), "References"),
 		Peek:         true,
 	}
-}
-
-func determineFetchEmail(account *config.Account) string {
-	fetchEmail := strings.ToLower(strings.TrimSpace(account.FetchEmail))
-	if fetchEmail == "" {
-		fetchEmail = strings.ToLower(strings.TrimSpace(account.Email))
-	}
-	return fetchEmail
 }
 
 func determineChunkSize(limit uint32) uint32 {
@@ -557,7 +526,7 @@ func fetchIMAPEmails(account *config.Account, mailbox string, limit, offset uint
 	}
 
 	cursor := selectData.NumMessages - offset
-	fetchEmail := determineFetchEmail(account)
+	addresses := newAccountAddresses(account)
 	sentMailbox, err := getMailboxByAttr(c, imap.MailboxAttrSent)
 	if err != nil {
 		sentMailbox = getSentMailbox(account)
@@ -589,7 +558,7 @@ func fetchIMAPEmails(account *config.Account, mailbox string, limit, offset uint
 			return nil, err
 		}
 
-		batchEmails := filterAndBuildBatchEmails(batchMsgs, fetchEmail, account, isSentMailbox, deliveryHeaderSection)
+		batchEmails := filterAndBuildBatchEmails(batchMsgs, addresses, isSentMailbox, deliveryHeaderSection)
 
 		// Sort batch Newest -> Oldest by UID desc
 		sort.Slice(batchEmails, func(i, j int) bool {
@@ -603,7 +572,7 @@ func fetchIMAPEmails(account *config.Account, mailbox string, limit, offset uint
 	return trimEmailsToLimit(allEmails, limit), nil
 }
 
-func filterAndBuildBatchEmails(batchMsgs []*imapclient.FetchMessageBuffer, fetchEmail string, account *config.Account, isSentMailbox bool, deliveryHeaderSection *imap.FetchItemBodySection) []Email {
+func filterAndBuildBatchEmails(batchMsgs []*imapclient.FetchMessageBuffer, addresses accountAddresses, isSentMailbox bool, deliveryHeaderSection *imap.FetchItemBodySection) []Email {
 	var batchEmails []Email
 	for _, msg := range batchMsgs {
 		if msg.Envelope == nil {
@@ -628,7 +597,7 @@ func filterAndBuildBatchEmails(batchMsgs []*imapclient.FetchMessageBuffer, fetch
 			replyToAddrList = append(replyToAddrList, addr.Addr())
 		}
 
-		if !messageMatchesAccount(msg, toAddrList, fetchEmail, account, isSentMailbox, deliveryHeaderSection) {
+		if !messageMatchesAccount(msg, toAddrList, addresses, isSentMailbox, deliveryHeaderSection) {
 			continue
 		}
 
@@ -644,31 +613,34 @@ func filterAndBuildBatchEmails(batchMsgs []*imapclient.FetchMessageBuffer, fetch
 			MessageID:  msg.Envelope.MessageID,
 			InReplyTo:  firstEnvelopeInReplyTo(msg.Envelope.InReplyTo),
 			References: headerMessageIDs(headerData, "References"),
-			AccountID:  account.ID,
+			AccountID:  addresses.account.ID,
 		})
 	}
 	return batchEmails
 }
 
-func messageMatchesAccount(msg *imapclient.FetchMessageBuffer, toAddrList []string, fetchEmail string, account *config.Account, isSentMailbox bool, deliveryHeaderSection *imap.FetchItemBodySection) bool {
-	switch {
-	case account.CatchAll:
+// messageMatchesAccount reports whether the account shows msg: in the Sent
+// folder when one of its addresses sent it, elsewhere when one of its
+// addresses is in To, Cc or a delivery header, or when the sender is one the
+// account always shows mail from.
+func messageMatchesAccount(msg *imapclient.FetchMessageBuffer, toAddrList []string, addresses accountAddresses, isSentMailbox bool, deliveryHeaderSection *imap.FetchItemBodySection) bool {
+	if addresses.account.CatchAll {
 		return true
-	case isSentMailbox:
-		var senderEmail string
-		if len(msg.Envelope.From) > 0 {
-			senderEmail = msg.Envelope.From[0].Addr()
-		}
-		return addressMatches(senderEmail, fetchEmail, account)
-	default:
-		for _, r := range toAddrList {
-			if addressMatches(r, fetchEmail, account) {
-				return true
-			}
-		}
-		headerData := msg.FindBodySection(deliveryHeaderSection)
-		return deliveryHeadersMatch(headerData, fetchEmail, account)
 	}
+	var senderEmail string
+	if len(msg.Envelope.From) > 0 {
+		senderEmail = msg.Envelope.From[0].Addr()
+	}
+	if isSentMailbox {
+		return addresses.isOwn(senderEmail)
+	}
+	if slices.ContainsFunc(toAddrList, addresses.isOwn) {
+		return true
+	}
+	if addresses.namedInDeliveryHeaders(msg.FindBodySection(deliveryHeaderSection)) {
+		return true
+	}
+	return addresses.alwaysShowsMailFrom(senderEmail)
 }
 
 func FetchMailboxEmails(account *config.Account, mailbox string, limit, offset uint32) ([]Email, error) {
@@ -1838,12 +1810,7 @@ func FetchArchiveEmails(account *config.Account, limit, offset uint32) ([]Email,
 	var seqset imap.SeqSet
 	seqset.AddRange(from, to)
 
-	// Delivery header section for matching auto-forwarded emails
-	deliveryHeaderSection := &imap.FetchItemBodySection{
-		Specifier:    imap.PartSpecifierHeader,
-		HeaderFields: []string{"Delivered-To", "X-Forwarded-To", "X-Original-To", "References"},
-		Peek:         true,
-	}
+	deliveryHeaderSection := buildDeliveryHeaderSection()
 
 	fetchCmd := c.Fetch(seqset, &imap.FetchOptions{
 		Envelope:    true,
@@ -1856,11 +1823,7 @@ func FetchArchiveEmails(account *config.Account, limit, offset uint32) ([]Email,
 		return nil, err
 	}
 
-	// Determine which email to filter on: prefer Account.FetchEmail, fallback to Account.Email
-	fetchEmail := strings.ToLower(strings.TrimSpace(account.FetchEmail))
-	if fetchEmail == "" {
-		fetchEmail = strings.ToLower(strings.TrimSpace(account.Email))
-	}
+	addresses := newAccountAddresses(account)
 
 	var emails []Email
 	for _, msg := range msgs {
@@ -1881,32 +1844,9 @@ func FetchArchiveEmails(account *config.Account, limit, offset uint32) ([]Email,
 			toAddrList = append(toAddrList, addr.Addr())
 		}
 
-		// For archive/All Mail, match emails where user is sender OR recipient
-		matched := false
-		if account.CatchAll {
-			matched = true
-		} else {
-			// Check if user is the sender
-			if addressMatches(fromAddr, fetchEmail, account) {
-				matched = true
-			}
-			// Check if user is a recipient
-			if !matched {
-				for _, r := range toAddrList {
-					if addressMatches(r, fetchEmail, account) {
-						matched = true
-						break
-					}
-				}
-			}
-			// Check delivery headers for auto-forwarded emails
-			if !matched {
-				headerData := msg.FindBodySection(deliveryHeaderSection)
-				matched = deliveryHeadersMatch(headerData, fetchEmail, account)
-			}
-		}
-
-		if !matched {
+		// All Mail also holds sent mail, so mail sent from one of the
+		// account's addresses is shown too.
+		if !addresses.isOwn(fromAddr) && !messageMatchesAccount(msg, toAddrList, addresses, false, deliveryHeaderSection) {
 			continue
 		}
 

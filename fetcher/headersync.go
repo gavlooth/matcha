@@ -14,17 +14,21 @@ import (
 // (JMAP, POP3, Maildir); their mail is not copied into the local header index.
 var ErrHeaderSyncNotSupported = errors.New("local header index needs an IMAP account")
 
-// ErrFolderUIDsChanged is returned by FetchMissingHeaders when the folder's
-// UIDVALIDITY changed since the scan; the caller must scan again.
-var ErrFolderUIDsChanged = errors.New("folder UIDs changed since the last scan")
+// ErrFolderNeedsNewScan is returned by FetchMissingHeaders when the folder's
+// UIDVALIDITY or the account's address settings changed since the scan; the
+// caller must scan again.
+var ErrFolderNeedsNewScan = errors.New("folder UIDs or the account's address settings changed since the last scan")
 
 // FolderHeaders is what the local search index knows about one folder of one
-// account. OtherUIDs are messages in the folder that are addressed to another
-// account sharing the mailbox; they are remembered so they are not fetched again.
+// account. OtherUIDs are messages in the folder that the account does not show
+// (see messageMatchesAccount); they are remembered so they are not fetched
+// again. AddressSettings is AddressSettings(account) when the folder was
+// scanned; a scan with other settings starts the folder over.
 type FolderHeaders struct {
-	UIDValidity uint32
-	Emails      []Email
-	OtherUIDs   []uint32
+	UIDValidity     uint32
+	AddressSettings string
+	Emails          []Email
+	OtherUIDs       []uint32
 }
 
 func headerSyncSupported(account *config.Account) bool {
@@ -78,8 +82,8 @@ func continueFolderHeaders(c *imapclient.Client, account *config.Account, folder
 	if err != nil {
 		return known, nil, err
 	}
-	if selected.UIDValidity != known.UIDValidity {
-		return known, nil, ErrFolderUIDsChanged
+	if selected.UIDValidity != known.UIDValidity || known.AddressSettings != AddressSettings(account) {
+		return known, nil, ErrFolderNeedsNewScan
 	}
 	fetchNow, later := splitBatch(missing, maxNew)
 	updated, err := fetchHeaders(c, account, folder, known, fetchNow)
@@ -94,10 +98,11 @@ func scanFolderHeaders(c *imapclient.Client, account *config.Account, folder str
 	if err != nil {
 		return known, nil, err
 	}
-	if selected.UIDValidity != known.UIDValidity {
+	addressSettings := AddressSettings(account)
+	if selected.UIDValidity != known.UIDValidity || known.AddressSettings != addressSettings {
 		known = FolderHeaders{}
 	}
-	updated := FolderHeaders{UIDValidity: selected.UIDValidity}
+	updated := FolderHeaders{UIDValidity: selected.UIDValidity, AddressSettings: addressSettings}
 	if selected.NumMessages == 0 {
 		return updated, nil, nil
 	}
@@ -151,8 +156,8 @@ func splitBatch(uids []uint32, n int) (now, later []uint32) {
 	return uids[:n], uids[n:]
 }
 
-// fetchHeaders adds the headers of uids to headers. UIDs addressed to another
-// account, or gone from the server meanwhile, go to OtherUIDs.
+// fetchHeaders adds the headers of uids to headers. UIDs the account does not
+// show, or gone from the server meanwhile, go to OtherUIDs.
 func fetchHeaders(c *imapclient.Client, account *config.Account, folder string, headers FolderHeaders, uids []uint32) (FolderHeaders, error) {
 	if len(uids) == 0 {
 		return headers, nil
@@ -175,15 +180,16 @@ func fetchHeaders(c *imapclient.Client, account *config.Account, folder string, 
 	if err != nil {
 		sentMailbox = getSentMailbox(account)
 	}
-	emails := filterAndBuildBatchEmails(msgs, determineFetchEmail(account), account, folder == sentMailbox, deliveryHeaderSection)
+	emails := filterAndBuildBatchEmails(msgs, newAccountAddresses(account), folder == sentMailbox, deliveryHeaderSection)
 	kept := make(map[uint32]bool, len(emails))
 	for _, email := range emails {
 		kept[email.UID] = true
 	}
 	updated := FolderHeaders{
-		UIDValidity: headers.UIDValidity,
-		Emails:      append(slices.Clip(headers.Emails), emails...),
-		OtherUIDs:   slices.Clip(headers.OtherUIDs),
+		UIDValidity:     headers.UIDValidity,
+		AddressSettings: headers.AddressSettings,
+		Emails:          append(slices.Clip(headers.Emails), emails...),
+		OtherUIDs:       slices.Clip(headers.OtherUIDs),
 	}
 	for _, uid := range uids {
 		if !kept[uid] {

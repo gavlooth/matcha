@@ -50,7 +50,12 @@ func memIMAP(t *testing.T) *imapclient.Client {
 
 func appendMessage(t *testing.T, c *imapclient.Client, folder, to, subject string, flags ...imap.Flag) {
 	t.Helper()
-	raw := fmt.Sprintf("From: Sender <sender@example.com>\r\nTo: %s\r\nSubject: %s\r\nDate: Mon, 19 Oct 2026 10:00:00 +0000\r\nMessage-ID: <%s@example.com>\r\n\r\nbody\r\n", to, subject, subject)
+	appendMessageFrom(t, c, folder, "Sender <sender@example.com>", to, subject, flags...)
+}
+
+func appendMessageFrom(t *testing.T, c *imapclient.Client, folder, from, to, subject string, flags ...imap.Flag) {
+	t.Helper()
+	raw := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nDate: Mon, 19 Oct 2026 10:00:00 +0000\r\nMessage-ID: <%s@example.com>\r\n\r\nbody\r\n", from, to, subject, subject)
 	cmd := c.Append(folder, int64(len(raw)), &imap.AppendOptions{Flags: flags})
 	if _, err := cmd.Write([]byte(raw)); err != nil {
 		t.Fatal(err)
@@ -93,7 +98,7 @@ func TestSyncFolderHeadersFetchesNewestFirstInSteps(t *testing.T) {
 	if got := headerUIDs(headers); !slices.Equal(got, []uint32{1, 2, 3, 4, 5}) || len(missing) != 0 {
 		t.Fatalf("next step has UIDs %v leaving %v, want all 5 and none left", got, missing)
 	}
-	if _, _, err := continueFolderHeaders(c, account, "INBOX", FolderHeaders{UIDValidity: headers.UIDValidity + 1}, []uint32{1}, 3); !errors.Is(err, ErrFolderUIDsChanged) {
+	if _, _, err := continueFolderHeaders(c, account, "INBOX", FolderHeaders{UIDValidity: headers.UIDValidity + 1}, []uint32{1}, 3); !errors.Is(err, ErrFolderNeedsNewScan) {
 		t.Fatalf("continuing after the folder's UIDVALIDITY changed returned %v", err)
 	}
 }
@@ -170,5 +175,48 @@ func TestSyncFolderHeadersRemembersMailForOtherAccounts(t *testing.T) {
 	headers, missing, err := scanFolderHeaders(c, account, "INBOX", headers, 10)
 	if err != nil || len(missing) != 0 || len(headers.Emails) != 1 {
 		t.Fatalf("second scan: emails %d, missing %v, err %v; the other account's mail must not be fetched again", len(headers.Emails), missing, err)
+	}
+}
+
+func TestSyncFolderHeadersFollowsChangedAddressSettings(t *testing.T) {
+	c := memIMAP(t)
+	account := &config.Account{ID: "a", Email: "me@example.com"}
+	appendMessage(t, c, "INBOX", "me@example.com", "mine")
+	appendMessage(t, c, "INBOX", "Old Me <old@example.com>", "to-alias")
+	appendMessageFrom(t, c, "INBOX", "Prof <prof@ee.uni.edu>", "prof@ee.uni.edu", "bcc-course")
+
+	scan := func(known FolderHeaders) FolderHeaders {
+		t.Helper()
+		headers, missing, err := scanFolderHeaders(c, account, "INBOX", known, 10)
+		if err != nil || len(missing) != 0 {
+			t.Fatalf("scan: missing %v, err %v", missing, err)
+		}
+		return headers
+	}
+	headers := scan(FolderHeaders{})
+	if got := headerUIDs(headers); !slices.Equal(got, []uint32{1}) {
+		t.Fatalf("before any extra settings the account shows %v, want [1]", got)
+	}
+
+	if _, _, err := continueFolderHeaders(c, &config.Account{ID: "a", Email: "me@example.com", ExtraAddresses: []string{"old@example.com"}}, "INBOX", headers, []uint32{1}, 3); !errors.Is(err, ErrFolderNeedsNewScan) {
+		t.Fatalf("continuing with changed address settings returned %v, want ErrFolderNeedsNewScan", err)
+	}
+
+	account.ExtraAddresses = []string{" Old@Example.com "}
+	headers = scan(headers)
+	if got := headerUIDs(headers); !slices.Equal(got, []uint32{1, 2}) || !slices.Equal(headers.OtherUIDs, []uint32{3}) {
+		t.Fatalf("with the extra address: emails %v, other UIDs %v; want [1 2] and [3]", got, headers.OtherUIDs)
+	}
+
+	account.AlwaysShowMailFrom = []string{"uni.edu"}
+	headers = scan(headers)
+	if got := headerUIDs(headers); !slices.Equal(got, []uint32{1, 2, 3}) {
+		t.Fatalf("with the sender domain: emails %v, want [1 2 3]", got)
+	}
+
+	account.ExtraAddresses = nil
+	headers = scan(headers)
+	if got := headerUIDs(headers); !slices.Equal(got, []uint32{1, 3}) {
+		t.Fatalf("after removing the extra address: emails %v, want [1 3]", got)
 	}
 }

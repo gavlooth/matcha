@@ -36,6 +36,7 @@ Cache (`~/.cache/matcha/`):
 | `contacts.json` | Contact autocomplete data |
 | `drafts.json` | Saved email drafts |
 | `folder_cache.json` | Folder listings per account |
+| `search_history.json` | Recent searches from the search box (last 50) |
 | `folder_emails/` | Per-folder email list cache |
 | `email_bodies/` | Cached email body content and attachment metadata |
 
@@ -48,6 +49,7 @@ On startup, `MigrateCacheFiles()` moves any cache files from the old location (`
 | `config.go` | Core configuration types (`Account`, `Config`, `MailingList`) and functions for loading, saving, and managing accounts. Handles IMAP/SMTP server resolution per provider, OS keyring integration, legacy config migration, and cache directory management (`cacheDir()`, `MigrateCacheFiles()`). |
 | `cache.go` | Email, contacts, drafts, and email body caching. Provides CRUD operations for `EmailCache`, `ContactsCache` (with search and frequency-based ranking), `DraftsCache` (with save/delete/get operations), and `EmailBodyCache` (per-folder body + attachment metadata caching with pruning). |
 | `folder_cache.go` | Caches IMAP folder listings per account and per-folder email metadata. Stores folder names to avoid repeated IMAP `LIST` commands, and caches email headers per folder for fast navigation. |
+| `search_history.go` | Saves recent search queries, newest first and at most 50, in `search_history.json`. |
 | `encryption.go` | Optional at-rest encryption using AES-256-GCM with Argon2id key derivation. Provides `SecureReadFile`/`SecureWriteFile` (transparent encryption wrappers used by all other files), `EnableSecureMode`/`DisableSecureMode`, password verification via an encrypted sentinel phrase, and session key management. |
 | `signature.go` | Loads and saves the user's email signature from `~/.config/matcha/signature.txt`. |
 | `oauth.go` | OAuth2 integration — token retrieval, authorization flow launcher, and embedded Python helper extraction. |

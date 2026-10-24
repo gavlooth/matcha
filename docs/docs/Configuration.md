@@ -63,8 +63,9 @@ Configuration is stored in `~/.config/matcha/config.json`.
 
 `send_as_email` is optional. When set, Matcha uses it for the outgoing `From` header while continuing to authenticate with the account's login address.
 
-Matcha shows mail in an account when its addresses appear in `To`, `Cc` or a `Delivered-To`/`X-Original-To`/`X-Forwarded-To` header. In Sent, one of the account's addresses must be the sender. `catch_all` shows every message; otherwise accounts stay separate when they share a mailbox. Settings → Accounts → `e` includes these address and visibility settings:
+Matcha shows mail in an account when its addresses appear in `To`, `Cc` or a `Delivered-To`/`X-Original-To`/`X-Forwarded-To` header. In Sent, one of the account's addresses must be the sender. Settings → Accounts → select an account → `e` includes these address and visibility settings:
 
+- **Fetch all mail** (`catch_all`): type `true` and press Enter to save if you want every message in this account's mailbox, regardless of its recipient address. This includes Bcc mail and mail to other addresses in a shared mailbox. Leave it `false` to filter by configured addresses.
 - `show_unaddressed_mail` shows mail only when its To, Cc and delivery headers name none of this account's addresses or any other configured account's addresses. This can reveal Bcc mail such as a teacher's course announcements. Mail naming another configured account stays hidden here. Sent is unaffected.
 - `always_show_mail_from` lists senders whose mail is shown even when it names none of the account's addresses. Use an address or a domain; a domain also covers its subdomains.
 - `extra_addresses` lists more addresses that deliver to the account, such as aliases or old addresses. Mail sent to them, or sent from them in Sent, is shown like mail for `fetch_email`. Reply-all also leaves them out of the recipients.

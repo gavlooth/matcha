@@ -470,8 +470,15 @@ func (m *Inbox) updateList() {
 		showAccountLabel = len(m.accounts) > 1
 	}
 
-	if !showAccountLabel && len(m.accounts) == 1 && m.accounts[0].CatchAll {
-		showAccountLabel = true
+	if !showAccountLabel {
+		for i := range m.accounts {
+			account := &m.accounts[i]
+			if (m.currentAccountID == "" || account.ID == m.currentAccountID) &&
+				(account.CatchAll || len(account.ExtraAddresses) > 0) {
+				showAccountLabel = true
+				break
+			}
+		}
 	}
 
 	items := m.itemsForEmails(displayEmails, showAccountLabel)
@@ -591,21 +598,41 @@ func (m *Inbox) accountLabelForEmail(email fetcher.Email) string {
 		}
 	}
 
-	if owningAcc != nil && owningAcc.CatchAll && len(email.To) > 0 {
-		return extractEmailAddress(email.To[0])
-	}
-
-	for _, acc := range m.accounts {
-		fetchEmail := accountDisplayEmail(acc)
-		for _, recipient := range email.To {
-			if sameEmailAddress(recipient, fetchEmail) {
-				return extractEmailAddress(recipient)
+	if owningAcc != nil {
+		if recipient := recipientForAccount(email, owningAcc); recipient != "" {
+			return recipient
+		}
+		if owningAcc.CatchAll {
+			for _, recipients := range [...][]string{email.DeliveryRecipients, email.To} {
+				if len(recipients) > 0 {
+					return extractEmailAddress(recipients[0])
+				}
 			}
+		}
+	}
+	for i := range m.accounts {
+		account := &m.accounts[i]
+		if account == owningAcc {
+			continue
+		}
+		if recipient := recipientForAccount(email, account); recipient != "" {
+			return recipient
 		}
 	}
 
 	if owningAcc != nil {
 		return accountDisplayEmail(*owningAcc)
+	}
+	return ""
+}
+
+func recipientForAccount(email fetcher.Email, account *config.Account) string {
+	for _, recipients := range [...][]string{email.To, email.DeliveryRecipients} {
+		for _, recipient := range recipients {
+			if fetcher.IsOwnAddress(account, recipient) {
+				return extractEmailAddress(recipient)
+			}
+		}
 	}
 	return ""
 }

@@ -121,8 +121,8 @@ func NewLogin(hideTips bool) *Login {
 			t.Placeholder = "Insecure (true/false) - Skip TLS verification"
 			t.Prompt = "🔓 > "
 		case inputCatchAll:
-			t.Placeholder = "Catch-All (true/false) - Show all inbox messages"
-			t.Prompt = "Catch-all (true/false) > "
+			t.Placeholder = "true/false"
+			t.Prompt = "Fetch all mail (true/false) > "
 		case inputExtraAddresses:
 			t.Placeholder = "Comma-separated aliases, optional"
 			t.Prompt = "Extra addresses > "
@@ -573,7 +573,7 @@ func (m *Login) View() tea.View {
 	case inputInsecure:
 		tip = "Type 'true' to disable TLS certificate verification (not recommended)."
 	case inputCatchAll:
-		tip = "Type 'true' to show all inbox messages regardless of To address (useful for catch-all domains)."
+		tip = "Type 'true' to show every message in this account's mailbox, including Bcc and mail to any address. False filters by configured addresses."
 	case inputExtraAddresses:
 		tip = "Other addresses that deliver to this mailbox, e.g. old addresses or aliases. Mail sent to them is shown too."
 	case inputAlwaysShowMailFrom:

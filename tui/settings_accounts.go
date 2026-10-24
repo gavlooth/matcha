@@ -169,7 +169,7 @@ func (m *Settings) viewAccounts() string {
 			providerInfo += " [Signature]"
 		}
 		if account.CatchAll {
-			providerInfo += " [Catch-All]"
+			providerInfo += " [Fetch all mail]"
 		}
 		if n := len(account.ExtraAddresses); n > 0 {
 			providerInfo += fmt.Sprintf(" [+%d addresses]", n)

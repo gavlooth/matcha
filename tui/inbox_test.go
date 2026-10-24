@@ -475,6 +475,43 @@ func TestInboxAccountLabelUsesMatchingRecipient(t *testing.T) {
 	}
 }
 
+func TestInboxLabelsPreserveAddressedAliases(t *testing.T) {
+	account := config.Account{
+		ID: "one", FetchEmail: "main@example.com",
+		ExtraAddresses: []string{"old@example.com"},
+	}
+	for _, tc := range []struct {
+		name          string
+		to, delivered []string
+		want          string
+	}{
+		{"alias in To", []string{"Old <old@example.com>"}, nil, "old@example.com"},
+		{"alias in delivery header", []string{"list@example.net"}, []string{"old@example.com"}, "old@example.com"},
+		{"own alias before another account", []string{"other@example.com", "old@example.com"}, nil, "old@example.com"},
+		{"primary recipient", []string{"main@example.com"}, nil, "main@example.com"},
+		{"unknown Bcc does not invent an alias", []string{"teacher@example.net"}, nil, "main@example.com"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			email := fetcher.Email{UID: 1, AccountID: account.ID, To: tc.to, DeliveryRecipients: tc.delivered}
+			for _, accounts := range [][]config.Account{
+				{account},
+				{account, {ID: "two", FetchEmail: "other@example.com"}},
+			} {
+				inbox := NewInbox([]fetcher.Email{email}, accounts)
+				if got := inbox.list.Items()[0].(item).accountEmail; got != tc.want {
+					t.Fatalf("combined inbox label = %q, want %q", got, tc.want)
+				}
+				if len(accounts) > 1 {
+					inbox.switchToTab(1)
+					if got := inbox.list.Items()[0].(item).accountEmail; got != tc.want {
+						t.Fatalf("account tab label = %q, want %q", got, tc.want)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestInboxOpenSearchResultEmbedsEmailInViewMsg(t *testing.T) {
 	accounts := []config.Account{
 		{ID: "account-1", Email: "mail.example.com", FetchEmail: "first@example.com"},

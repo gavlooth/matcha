@@ -77,19 +77,20 @@ type CapabilityProvider interface {
 
 // Email represents a single email message.
 type Email struct {
-	UID         uint32
-	From        string
-	To          []string
-	ReplyTo     []string
-	Subject     string
-	Body        string
-	Date        time.Time
-	IsRead      bool
-	MessageID   string
-	InReplyTo   string
-	References  []string
-	Attachments []Attachment
-	AccountID   string
+	UID                uint32
+	From               string
+	To                 []string
+	ReplyTo            []string
+	Subject            string
+	Body               string
+	Date               time.Time
+	IsRead             bool
+	MessageID          string
+	InReplyTo          string
+	References         []string
+	Attachments        []Attachment
+	AccountID          string
+	DeliveryRecipients []string
 }
 
 // Attachment holds data for an email attachment.

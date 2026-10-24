@@ -181,11 +181,14 @@ func TestEditingAccountKeepsSettingsTheFormDoesNotShow(t *testing.T) {
 	existing := config.Account{
 		ID: "a", Email: "me@outlook.com", ServiceProvider: "outlook", AuthMethod: "oauth2",
 		OAuthTokenCmd: "token-cmd", PassCmd: "pass-cmd", PGPKeySource: "file", PGPPublicKey: "pub.asc",
-		Password: "kept",
+		Password: "kept", ExtraAddresses: []string{"old@outlook.com", "removed@example.com"},
+		IgnoredAddresses: []string{"dismissed@example.com"},
 	}
 	edited := buildAccount("a", tui.Credentials{
 		Provider: "outlook", Host: "me@outlook.com", AuthMethod: "oauth2",
-		ExtraAddresses: []string{"old@outlook.com"},
+		ExtraAddresses:      []string{"old@outlook.com"},
+		AlwaysShowMailFrom:  []string{"prof@example.com"},
+		ShowUnaddressedMail: true, DiscoverExtraAddresses: true,
 	}, "me@outlook.com")
 
 	got := withEditedFields(existing, edited)
@@ -194,5 +197,83 @@ func TestEditingAccountKeepsSettingsTheFormDoesNotShow(t *testing.T) {
 	}
 	if !slices.Equal(got.ExtraAddresses, []string{"old@outlook.com"}) {
 		t.Fatalf("ExtraAddresses = %v, want the edited list", got.ExtraAddresses)
+	}
+	if !slices.Equal(got.IgnoredAddresses, []string{"dismissed@example.com", "removed@example.com"}) {
+		t.Fatalf("IgnoredAddresses = %v, want removed address added once", got.IgnoredAddresses)
+	}
+	readded := withEditedFields(got, config.Account{ExtraAddresses: []string{"old@outlook.com", "REMOVED@example.com"}})
+	if !slices.Equal(readded.IgnoredAddresses, []string{"dismissed@example.com"}) {
+		t.Fatalf("adding the address back did not remove it from IgnoredAddresses: %v", readded.IgnoredAddresses)
+	}
+	if !got.ShowUnaddressedMail || !got.DiscoverExtraAddresses || !slices.Equal(got.AlwaysShowMailFrom, []string{"prof@example.com"}) {
+		t.Fatalf("edited address settings were not kept: %+v", got)
+	}
+}
+
+func TestReplyFromOverrideUsesAliasAndKeepsDefaultForMainAddress(t *testing.T) {
+	cfg := &config.Config{Accounts: []config.Account{{
+		ID: "a", FetchEmail: "main@example.com", Name: "Teacher",
+		ExtraAddresses: []string{"course@example.com"},
+	}}}
+	tests := []struct {
+		name  string
+		email fetcher.Email
+		want  string
+	}{
+		{"alias in To", fetcher.Email{To: []string{"COURSE@example.com"}}, "Teacher <course@example.com>"},
+		{"alias in Cc", fetcher.Email{To: []string{"other@example.net", "COURSE@example.com"}}, "Teacher <course@example.com>"},
+		{"primary in Cc after alias", fetcher.Email{To: []string{"course@example.com", "main@example.com"}}, ""},
+		{"alias only in delivery headers", fetcher.Email{To: []string{"other@example.net"}, DeliveryRecipients: []string{"COURSE@example.com"}}, "Teacher <course@example.com>"},
+		{"primary in delivery headers beats To alias", fetcher.Email{To: []string{"course@example.com"}, DeliveryRecipients: []string{"main@example.com"}}, ""},
+		{"primary in Cc beats delivery alias", fetcher.Email{To: []string{"other@example.net", "main@example.com"}, DeliveryRecipients: []string{"course@example.com"}}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.email.AccountID = "a"
+			if got := replyFromOverride(cfg, tt.email); got != tt.want {
+				t.Fatalf("From override = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestReplyFromOverrideKeepsCatchAllDeliveryAddress(t *testing.T) {
+	cfg := &config.Config{Accounts: []config.Account{{
+		ID: "a", FetchEmail: "catch@example.com", Name: "User", CatchAll: true,
+	}}}
+	if got := replyFromOverride(cfg, fetcher.Email{AccountID: "a", To: []string{"specific@example.net"}}); got != "User <specific@example.net>" {
+		t.Fatalf("catch-all From = %q", got)
+	}
+	email := fetcher.Email{
+		AccountID: "a", To: []string{"unrelated@example.org"},
+		DeliveryRecipients: []string{"specific@example.net", "forwarded@example.org"},
+	}
+	if got := replyFromOverride(cfg, email); got != "User <specific@example.net>" {
+		t.Fatalf("catch-all From ignored actual delivery address: %q", got)
+	}
+	email.DeliveryRecipients = []string{"specific@example.net", "catch@example.com"}
+	if got := replyFromOverride(cfg, email); got != "" {
+		t.Fatalf("catch-all From overrode primary delivery recipient: %q", got)
+	}
+}
+
+func TestCachedReplyRecipientsSurviveOpeningBody(t *testing.T) {
+	cfg := &config.Config{Accounts: []config.Account{{
+		ID: "a", FetchEmail: "main@example.com", ExtraAddresses: []string{"course@example.com"},
+	}}}
+	email := fetcher.Email{
+		UID: 7, AccountID: "a", To: []string{"unrelated@example.net"},
+		DeliveryRecipients: []string{"course@example.com"},
+	}
+	restored := emailstore.CacheToEmails(emailstore.EmailsToCache([]fetcher.Email{email}))
+	store := emailstore.NewStore()
+	store.SetFolder("INBOX", restored)
+	store.UpdateEmailBodyByUID(email.UID, email.AccountID, "body", "text/plain", nil)
+	opened := store.GetEmailByUIDAndAccount(email.UID, email.AccountID)
+	if opened == nil || opened.Body != "body" {
+		t.Fatalf("email body not opened: %+v", opened)
+	}
+	if got := replyFromOverride(cfg, *opened); got != "course@example.com" {
+		t.Fatalf("opening cached body lost delivery alias: From override = %q", got)
 	}
 }

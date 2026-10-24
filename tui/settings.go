@@ -8,6 +8,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/floatpane/matcha/config"
+	"github.com/floatpane/matcha/internal/headerindex"
 	"github.com/floatpane/matcha/internal/passwordstrength"
 	"github.com/floatpane/matcha/plugin"
 	"github.com/floatpane/matcha/theme"
@@ -57,11 +58,16 @@ type Settings struct {
 	menuCursor int
 
 	// Sub-components states
-	generalCursor    int
-	accountsCursor   int
-	themeCursor      int
-	listsCursor      int
-	confirmingDelete bool
+	generalCursor      int
+	accountsCursor     int
+	themeCursor        int
+	listsCursor        int
+	confirmingDelete   bool
+	suggestionsOpen    bool
+	suggestionsAccount int
+	suggestionsCursor  int
+	suggestedAddresses []headerindex.AddressCount
+	hiddenSearcher     HiddenSearcher
 
 	// Contacts state
 	contactsCursor     int
@@ -158,6 +164,11 @@ func (m *Settings) SetPlugins(p *plugin.Manager) {
 	m.plugins = p
 }
 
+// SetHiddenSearcher gives account settings hidden recipient counts.
+func (m *Settings) SetHiddenSearcher(searcher HiddenSearcher) {
+	m.hiddenSearcher = searcher
+}
+
 func (m *Settings) GetState() SettingsState {
 	return SettingsState{
 		ActivePane:     m.activePane,
@@ -204,6 +215,21 @@ func (m *Settings) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
+	case LocalSearchIndexChangedMsg:
+		if m.suggestionsOpen && m.suggestionsAccount < len(m.cfg.Accounts) {
+			selected := ""
+			if m.suggestionsCursor < len(m.suggestedAddresses) {
+				selected = m.suggestedAddresses[m.suggestionsCursor].Address
+			}
+			m.openAddressSuggestions(m.suggestionsAccount)
+			for i, suggestion := range m.suggestedAddresses {
+				if suggestion.Address == selected {
+					m.suggestionsCursor = i
+					break
+				}
+			}
+		}
+		return m, nil
 	case tea.MouseWheelMsg:
 		if m.activePane == PaneMenu {
 			switch msg.Button {
@@ -320,7 +346,7 @@ func (m *Settings) updateKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// Global shortcut to return to menu from content pane
 	if m.activePane == PaneContent && msg.String() == "esc" {
 		// unless we are in crypto config or encryption editing which have their own esc logic
-		if (m.activeCategory != CategoryAccounts || !m.isCryptoConfig) &&
+		if (m.activeCategory != CategoryAccounts || (!m.isCryptoConfig && !m.suggestionsOpen)) &&
 			(m.activeCategory != CategoryEncryption || m.encFocusIndex <= -1) &&
 			(m.activeCategory != CategoryPlugins || (!m.pluginEditing && m.pluginSelected == "")) {
 			m.activePane = PaneMenu

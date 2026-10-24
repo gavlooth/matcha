@@ -21,6 +21,7 @@ const (
 	ruleSubject
 	ruleMoveTo
 	ruleMarkRead
+	ruleShowInAccount
 	ruleEnabled
 	ruleSave
 	ruleCancel
@@ -260,6 +261,8 @@ func (m *Settings) activateRuleField() tea.Cmd {
 		m.cycleRuleAccount(1)
 	case ruleMarkRead:
 		m.rules.draft.MarkRead = !m.rules.draft.MarkRead
+	case ruleShowInAccount:
+		m.rules.draft.ShowInAccount = !m.rules.draft.ShowInAccount
 	case ruleEnabled:
 		m.rules.draft.Enabled = !m.rules.draft.Enabled
 	case ruleSave:
@@ -409,7 +412,7 @@ func (m *Settings) ruleRows() ([]string, []int) {
 		rows = append(rows, m.contentItemStyle(m.rules.cursor == len(m.rules.list)).Render(m.contentCursor(m.rules.cursor == len(m.rules.list))+"Add rule (disabled by default)"))
 		return rows, positions
 	}
-	labels := []string{"Name", "Account scope", "From contains", "To contains", "Subject contains", "Move to folder (blank = no move)", "Mark read", "Enabled", "Save", "Cancel"}
+	labels := []string{"Name", "Account scope", "From contains", "To contains", "Subject contains", "Move to folder (blank = no move)", "Mark read", "Show in this account even when not addressed to it", "Enabled", "Save", "Cancel"}
 	for field, label := range labels {
 		positions = append(positions, len(rows))
 		selected := m.rules.focus == field
@@ -425,6 +428,8 @@ func (m *Settings) ruleRows() ([]string, []int) {
 			continue
 		case ruleMarkRead:
 			label = ruleChecked(m.rules.draft.MarkRead) + " " + label
+		case ruleShowInAccount:
+			label = ruleChecked(m.rules.draft.ShowInAccount) + " " + label
 		case ruleEnabled:
 			label = ruleChecked(m.rules.draft.Enabled) + " " + label
 		}
@@ -460,7 +465,7 @@ func (m *Settings) ruleLayout() (header, body, footer []string, start int) {
 	header = []string{
 		titleStyle.Render("Rules"),
 		helpStyle.Render("Local only · AND · first match wins"),
-		helpStyle.Render("Future mail only · existing mail left alone · ? help"),
+		helpStyle.Render("Move/read: future mail · Show: existing mail too · ? help"),
 	}
 	rows, positions := m.ruleRows()
 	footer = m.ruleFooter()
@@ -485,7 +490,7 @@ func (m *Settings) ruleLayout() (header, body, footer []string, start int) {
 }
 
 func (m *Settings) ruleHelpLines() []string {
-	text := "Rules run locally while Matcha is open, for IMAP accounts only. They are not provider-side/Sieve rules.\n\nFrom, To and Subject are case-insensitive substring matches. Every nonempty condition must match (AND). Account scope can be all configured accounts or one account.\n\nThe first enabled matching rule wins, even if it only marks mail read. Use uppercase K/J in the list to move rules earlier/later.\n\nRules apply to future incoming mail only. New, edited or newly enabled rules establish their starting point at the next background check (up to 30 seconds after saving); existing inbox messages are left alone. Once that starting point is established, unchanged rules also process mail that arrives while Matcha is closed when it next runs. New rules start disabled.\n\nDestination is the exact IMAP folder name; leave it blank for no move. Moving to INBOX is not allowed. At least one condition and one action are required. Rules never delete or forward mail.\n\nList: Enter edits (or adds at Add rule), n creates, Space enables/disables, d requests deletion, r reloads. In forms use Tab/Shift+Tab or arrows between fields; text fields accept spaces and editing keys. Ctrl+S saves; Esc cancels without saving.\n\nChanges take effect automatically after saving. No mail is processed by this settings screen."
+	text := "Rules run locally while Matcha is open, for IMAP accounts only. They are not provider-side/Sieve rules.\n\nFrom, To and Subject are case-insensitive substring matches. Every nonempty condition must match (AND). Account scope can be all configured accounts or one account.\n\nFor moving or marking mail read, the first enabled matching rule wins, even if it only shows mail. Use uppercase K/J in the list to move rules earlier/later. Enabled show rules also determine visibility independently.\n\nMove and mark-read actions apply to future incoming mail only. New, edited or newly enabled rules establish their starting point at the next background check (up to 30 seconds after saving); existing inbox messages are left alone. After that starting point, unchanged rules also process mail that arrives while Matcha is closed when it next runs. Show-in-account also makes matching existing mail visible when the inbox and header copy refresh. New rules start disabled.\n\nDestination is the exact IMAP folder name; leave it blank for no move. Moving to INBOX is not allowed. At least one condition and one action are required. Rules never delete or forward mail.\n\nList: Enter edits (or adds at Add rule), n creates, Space enables/disables, d requests deletion, r reloads. In forms use Tab/Shift+Tab or arrows between fields; text fields accept spaces and editing keys. Ctrl+S saves; Esc cancels without saving.\n\nChanges take effect automatically after saving. No mail is processed by this settings screen."
 	return strings.Split(ansi.Hardwrap(text, m.ruleWidth(), true), "\n")
 }
 

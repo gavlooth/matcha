@@ -3,10 +3,13 @@ package fetcher
 import (
 	"testing"
 
+	"github.com/emersion/go-imap/v2"
+	"github.com/emersion/go-imap/v2/imapclient"
 	"github.com/floatpane/matcha/config"
 )
 
 func TestAccountAddressesIsOwn(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	custom := newAccountAddresses(&config.Account{Email: "login@example.com", FetchEmail: "me@example.com", ExtraAddresses: []string{"Old <old@example.com>", "  "}})
 	gmail := newAccountAddresses(&config.Account{ServiceProvider: "gmail", Email: "me@gmail.com", ExtraAddresses: []string{"other.me@gmail.com"}})
 
@@ -33,6 +36,7 @@ func TestAccountAddressesIsOwn(t *testing.T) {
 }
 
 func TestAccountAddressesNamedInDeliveryHeaders(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	addresses := newAccountAddresses(&config.Account{Email: "me@example.com", ExtraAddresses: []string{"old@example.com"}})
 	cases := map[string]bool{
 		"Delivered-To: <old@example.com>\r\n\r\n":                      true,
@@ -75,5 +79,55 @@ func TestAddressSettingsIgnoresOrderAndCase(t *testing.T) {
 	b.AlwaysShowMailFrom = nil
 	if AddressSettings(a) == AddressSettings(b) {
 		t.Error("removing a sender must change the address settings")
+	}
+}
+func TestMessageMatchesUnaddressedMailOnlyWhenNoAccountIsNamed(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	message := &imapclient.FetchMessageBuffer{Envelope: &imap.Envelope{
+		From:    []imap.Address{{Mailbox: "teacher", Host: "school.example"}},
+		Subject: "Course update",
+	}}
+	section := &imap.FetchItemBodySection{Specifier: imap.PartSpecifierHeader}
+	account := &config.Account{
+		ID: "course", Email: "course@example.com", FetchEmail: "course@example.com",
+		ShowUnaddressedMail: true, OtherAccountAddresses: []string{"personal@example.com"},
+	}
+	addresses := newAccountAddresses(account)
+	if !messageMatchesAccount(message, nil, addresses, false, section) {
+		t.Fatal("opted-in account hid unaddressed mail")
+	}
+	if messageMatchesAccount(message, nil, addresses, true, section) {
+		t.Fatal("Sent mail was shown without an account sender address")
+	}
+	if messageMatchesAccount(message, []string{"personal@example.com"}, addresses, false, section) {
+		t.Fatal("mail addressed to another configured account was shown")
+	}
+	account.ShowUnaddressedMail = false
+	if messageMatchesAccount(message, nil, newAccountAddresses(account), false, section) {
+		t.Fatal("flag off changed the existing hidden-mail behavior")
+	}
+}
+
+func TestShowInAccountRuleMakesMatchingBccMailVisible(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	message := &imapclient.FetchMessageBuffer{Envelope: &imap.Envelope{
+		From:    []imap.Address{{Mailbox: "teacher", Host: "school.example"}},
+		Subject: "Course update",
+	}}
+	section := &imap.FetchItemBodySection{Specifier: imap.PartSpecifierHeader}
+	account := &config.Account{ID: "course", Email: "course@example.com"}
+	rule := config.MailRule{ID: "show-course", Name: "Course", Enabled: true, AccountID: account.ID, From: "teacher", Subject: "update", ShowInAccount: true}
+	if err := config.SaveMailRules([]config.MailRule{rule}); err != nil {
+		t.Fatal(err)
+	}
+	if !messageMatchesAccount(message, nil, newAccountAddresses(account), false, section) {
+		t.Fatal("matching show rule hid Bcc mail")
+	}
+	rule.Enabled = false
+	if err := config.SaveMailRules([]config.MailRule{rule}); err != nil {
+		t.Fatal(err)
+	}
+	if messageMatchesAccount(message, nil, newAccountAddresses(account), false, section) {
+		t.Fatal("disabled show rule made Bcc mail visible")
 	}
 }

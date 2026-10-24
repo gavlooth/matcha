@@ -21,6 +21,7 @@ import (
 	"golang.org/x/text/runes"
 	"golang.org/x/text/transform"
 	"golang.org/x/text/unicode/norm"
+	"net/mail"
 )
 
 type folderKey struct {
@@ -63,6 +64,7 @@ type Index struct {
 	folders  map[folderKey]*folderIndex
 	syncing  map[folderKey]*syncRun
 	finished map[folderKey]time.Time
+	accounts map[string]*config.Account
 }
 
 func New() *Index {
@@ -70,6 +72,7 @@ func New() *Index {
 		folders:  make(map[folderKey]*folderIndex),
 		syncing:  make(map[folderKey]*syncRun),
 		finished: make(map[folderKey]time.Time),
+		accounts: make(map[string]*config.Account),
 	}
 }
 
@@ -89,9 +92,12 @@ func (x *Index) Load(accountID, folder string) {
 		log.Printf("header index: starting %s of %s over: %v", folder, accountID, err)
 		saved = &config.HeaderIndex{}
 	}
-	headers := fetcher.FolderHeaders{UIDValidity: saved.UIDValidity, AddressSettings: saved.AddressSettings, OtherUIDs: saved.OtherUIDs}
+	headers := fetcher.FolderHeaders{UIDValidity: saved.UIDValidity, AddressSettings: saved.AddressSettings}
 	for _, cached := range saved.Emails {
 		headers.Emails = append(headers.Emails, emailFromCache(cached))
+	}
+	for _, cached := range saved.HiddenEmails {
+		headers.Hidden = append(headers.Hidden, emailFromCache(cached))
 	}
 	x.mu.Lock()
 	if _, loaded := x.folders[key]; !loaded {
@@ -140,6 +146,9 @@ func (x *Index) Syncing(folder string, accountIDs []string) bool {
 // (deleted mail, read state, which UIDs are missing); later steps only fetch
 // the next maxNew missing headers. The caller must hold the StartSync mark.
 func (x *Index) SyncStep(account *config.Account, folder string, maxNew int) (int, error) {
+	x.mu.Lock()
+	x.accounts[account.ID] = accountForAddressChecks(account)
+	x.mu.Unlock()
 	x.Load(account.ID, folder)
 	key := folderKey{account.ID, folder}
 	x.mu.RLock()
@@ -168,9 +177,12 @@ func (x *Index) SyncStep(account *config.Account, folder string, maxNew int) (in
 	run.steps++
 
 	if firstStep || len(missing) == 0 || run.steps%saveEverySteps == 0 {
-		saved := &config.HeaderIndex{UIDValidity: updated.UIDValidity, AddressSettings: updated.AddressSettings, OtherUIDs: updated.OtherUIDs}
+		saved := &config.HeaderIndex{UIDValidity: updated.UIDValidity, AddressSettings: updated.AddressSettings}
 		for _, email := range updated.Emails {
 			saved.Emails = append(saved.Emails, emailToCache(email))
+		}
+		for _, email := range updated.Hidden {
+			saved.HiddenEmails = append(saved.HiddenEmails, emailToCache(email))
 		}
 		if err := config.SaveHeaderIndex(account.ID, folder, saved); err != nil {
 			return 0, err
@@ -199,6 +211,107 @@ func (x *Index) Count(folder string, accountIDs []string) int {
 		}
 	}
 	return total
+}
+
+// SetAccount updates address ownership used when counting hidden recipients.
+func (x *Index) SetAccount(account *config.Account) {
+	if account == nil {
+		return
+	}
+	x.mu.Lock()
+	x.accounts[account.ID] = accountForAddressChecks(account)
+	x.mu.Unlock()
+}
+
+// HiddenCount returns the hidden mail count for the chosen accounts.
+func (x *Index) HiddenCount(folder string, accountIDs []string) int {
+	x.mu.RLock()
+	defer x.mu.RUnlock()
+	total := 0
+	for _, id := range accountIDs {
+		if index := x.folders[folderKey{id, folder}]; index != nil {
+			total += len(index.headers.Hidden)
+		}
+	}
+	return total
+}
+
+// Hidden returns hidden mail newest first for the chosen accounts.
+func (x *Index) Hidden(folder string, accountIDs []string) []fetcher.Email {
+	x.mu.RLock()
+	defer x.mu.RUnlock()
+	var emails []fetcher.Email
+	for _, id := range accountIDs {
+		if index := x.folders[folderKey{id, folder}]; index != nil {
+			emails = append(emails, index.headers.Hidden...)
+		}
+	}
+	slices.SortFunc(emails, func(a, b fetcher.Email) int {
+		if order := b.Date.Compare(a.Date); order != 0 {
+			return order
+		}
+		if order := cmp.Compare(b.UID, a.UID); order != 0 {
+			return order
+		}
+		return cmp.Compare(a.AccountID, b.AccountID)
+	})
+	return emails
+}
+
+type AddressCount struct {
+	Address string
+	Count   int
+}
+
+// HiddenRecipients counts To and Cc recipients in hidden mail, excluding this
+// account's configured addresses.
+func (x *Index) HiddenRecipients(accountID, folder string) []AddressCount {
+	x.mu.RLock()
+	defer x.mu.RUnlock()
+	index := x.folders[folderKey{accountID, folder}]
+	if index == nil {
+		return nil
+	}
+	account := x.accounts[accountID]
+	counts := make(map[string]int)
+	for _, email := range index.headers.Hidden {
+		seen := make(map[string]struct{}, len(email.To))
+		for _, recipient := range email.To {
+			address := bareRecipientAddress(recipient)
+			if address == "" || fetcher.IsOwnAddress(account, address) {
+				continue
+			}
+			if _, duplicate := seen[address]; duplicate {
+				continue
+			}
+			seen[address] = struct{}{}
+			counts[address]++
+		}
+	}
+	recipients := make([]AddressCount, 0, len(counts))
+	for address, count := range counts {
+		recipients = append(recipients, AddressCount{Address: address, Count: count})
+	}
+	slices.SortFunc(recipients, func(a, b AddressCount) int {
+		if order := cmp.Compare(b.Count, a.Count); order != 0 {
+			return order
+		}
+		return cmp.Compare(a.Address, b.Address)
+	})
+	return recipients
+}
+
+func bareRecipientAddress(value string) string {
+	if parsed, err := mail.ParseAddress(value); err == nil {
+		value = parsed.Address
+	}
+	return strings.ToLower(strings.Trim(strings.TrimSpace(value), "<>"))
+}
+
+func accountForAddressChecks(account *config.Account) *config.Account {
+	copy := *account
+	copy.ExtraAddresses = slices.Clone(account.ExtraAddresses)
+	return &copy
 }
 
 // CanSearch reports whether the query only uses fields the local copy has.
@@ -422,7 +535,8 @@ func fold(s string) string {
 func emailFromCache(c config.CachedEmail) fetcher.Email {
 	return fetcher.Email{
 		UID: c.UID, From: c.From, To: c.To, Subject: c.Subject, Date: c.Date,
-		MessageID: c.MessageID, InReplyTo: c.InReplyTo, References: c.References,
+		DeliveryRecipients: c.DeliveryRecipients,
+		MessageID:          c.MessageID, InReplyTo: c.InReplyTo, References: c.References,
 		AccountID: c.AccountID, IsRead: c.IsRead,
 	}
 }
@@ -430,7 +544,8 @@ func emailFromCache(c config.CachedEmail) fetcher.Email {
 func emailToCache(e fetcher.Email) config.CachedEmail {
 	return config.CachedEmail{
 		UID: e.UID, From: e.From, To: e.To, Subject: e.Subject, Date: e.Date,
-		MessageID: e.MessageID, InReplyTo: e.InReplyTo, References: e.References,
+		DeliveryRecipients: e.DeliveryRecipients,
+		MessageID:          e.MessageID, InReplyTo: e.InReplyTo, References: e.References,
 		AccountID: e.AccountID, IsRead: e.IsRead,
 	}
 }

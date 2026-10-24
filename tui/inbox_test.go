@@ -12,6 +12,7 @@ import (
 	"github.com/floatpane/matcha/backend"
 	"github.com/floatpane/matcha/config"
 	"github.com/floatpane/matcha/fetcher"
+	"github.com/floatpane/matcha/internal/headerindex"
 )
 
 func collectMsgs(cmd tea.Cmd) []tea.Msg {
@@ -123,6 +124,177 @@ func TestInboxMultiAccountTabs(t *testing.T) {
 	if inbox.tabs[1].Label != "test1@example.com" || inbox.tabs[1].Email != "test1@example.com" {
 		t.Errorf("Expected SetEmails to preserve FetchEmail tab display, got label=%q email=%q", inbox.tabs[1].Label, inbox.tabs[1].Email)
 	}
+}
+
+func TestInboxHiddenMailCountAndHListFollowActiveTab(t *testing.T) {
+	accounts := []config.Account{
+		{ID: "account-1", Email: "first@example.com"},
+		{ID: "account-2", Email: "second@example.com"},
+	}
+	inbox := NewInbox(nil, accounts)
+	hidden := &fakeHiddenSearcher{
+		counts: map[string]int{"account-1": 2, "account-2": 3},
+		emails: []fetcher.Email{
+			{UID: 12, AccountID: "account-1", Subject: "Hidden first", IsRead: true},
+			{UID: 13, AccountID: "account-1", Subject: "Hidden first extra"},
+			{UID: 23, AccountID: "account-2", Subject: "Hidden second"},
+		},
+	}
+	inbox.SetFolderName("INBOX")
+	inbox.SetHiddenSearcher(hidden)
+	if !strings.Contains(inbox.list.Title, "5 hidden") {
+		t.Fatalf("ALL tab title = %q", inbox.list.Title)
+	}
+
+	model, _ := inbox.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
+	inbox = model.(*Inbox)
+	if !strings.Contains(inbox.list.Title, "2 hidden") {
+		t.Fatalf("account tab title = %q", inbox.list.Title)
+	}
+	inbox.unreadOnly = true
+	model, _ = inbox.Update(tea.KeyPressMsg{Code: 'H', Text: "H"})
+	inbox = model.(*Inbox)
+	if len(inbox.searchResults) != 2 || inbox.searchResults[0].AccountID != "account-1" || inbox.searchResults[1].AccountID != "account-1" || inbox.emailsCount != 2 {
+		t.Fatalf("H omitted read hidden mail or showed mail outside the active tab: displayed=%d results=%+v", inbox.emailsCount, inbox.searchResults)
+	}
+	if !strings.Contains(inbox.View().Content, "2 hidden mails: they name none of this account's addresses") {
+		t.Fatalf("hidden-list status missing: %s", inbox.View().Content)
+	}
+	_, cmd := inbox.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("opening hidden mail did not produce an email view")
+	}
+	if opened, ok := cmd().(ViewEmailMsg); !ok || opened.AccountID != "account-1" || opened.UID != 12 {
+		t.Fatalf("opened message = %#v", cmd())
+	}
+	inbox.SetFolderName("Archive")
+	inbox.SetEmails(nil, accounts)
+	if inbox.searchActive || inbox.hiddenView || inbox.hiddenStatus != "" || len(inbox.searchResults) != 0 || len(inbox.displayEmails()) != 0 {
+		t.Fatalf("folder switch kept the old hidden list: active=%v hidden=%v status=%q results=%v", inbox.searchActive, inbox.hiddenView, inbox.hiddenStatus, inbox.searchResults)
+	}
+}
+
+func TestInboxHiddenMailRefreshesAfterActiveFolderIndexLoads(t *testing.T) {
+	accounts := []config.Account{
+		{ID: "account-1", Email: "first@example.com"},
+		{ID: "account-2", Email: "second@example.com"},
+	}
+	inbox := NewInbox(nil, accounts)
+	inbox.SetFolderName("Archive")
+	hidden := &fakeHiddenSearcher{emailsByFolder: make(map[string][]fetcher.Email)}
+	inbox.SetHiddenSearcher(hidden)
+	inbox.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
+	inbox.unreadOnly = true
+
+	_, cmd := inbox.Update(tea.KeyPressMsg{Code: 'H', Text: "H"})
+	if !inbox.hiddenView || !inbox.searchActive || inbox.emailsCount != 0 {
+		t.Fatalf("H did not enter the empty hidden view: hidden=%v active=%v count=%d", inbox.hiddenView, inbox.searchActive, inbox.emailsCount)
+	}
+	if !strings.Contains(inbox.hiddenStatus, "0 hidden mails:") {
+		t.Fatalf("empty hidden status = %q", inbox.hiddenStatus)
+	}
+	msgs := collectMsgs(cmd)
+	if len(msgs) != 1 {
+		t.Fatalf("H load requests = %#v", msgs)
+	}
+	if opened, ok := msgs[0].(SearchOpenedMsg); !ok || opened.FolderName != "Archive" || opened.AccountID != "account-1" {
+		t.Fatalf("H requested the wrong folder or account: %#v", msgs[0])
+	}
+
+	hidden.emailsByFolder["INBOX"] = []fetcher.Email{
+		{UID: 1, AccountID: "account-1", Subject: "Other folder"},
+	}
+	hidden.emailsByFolder["Archive"] = []fetcher.Email{
+		{UID: 23, AccountID: "account-2", Subject: "Other account"},
+	}
+	inbox.Update(LocalSearchIndexChangedMsg{})
+	if inbox.emailsCount != 0 {
+		t.Fatalf("unrelated index contents entered the hidden view: %+v", inbox.searchResults)
+	}
+
+	hidden.emailsByFolder["Archive"] = append(hidden.emailsByFolder["Archive"],
+		fetcher.Email{UID: 12, AccountID: "account-1", Subject: "Read hidden mail", IsRead: true},
+		fetcher.Email{UID: 13, AccountID: "account-1", Subject: "Unread hidden mail"},
+	)
+	inbox.Update(LocalSearchIndexChangedMsg{})
+	if inbox.emailsCount != 2 || len(inbox.searchResults) != 2 || inbox.searchResults[0].UID != 12 || inbox.searchResults[1].UID != 13 {
+		t.Fatalf("loaded hidden view has the wrong scope or omitted read mail: count=%d results=%+v", inbox.emailsCount, inbox.searchResults)
+	}
+	if !strings.Contains(inbox.hiddenStatus, "2 hidden mails:") || !strings.Contains(inbox.list.Title, "2 hidden") {
+		t.Fatalf("loaded count was not refreshed: title=%q status=%q", inbox.list.Title, inbox.hiddenStatus)
+	}
+
+	inbox.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	inbox.Update(tea.KeyPressMsg{Code: 'v', Text: "v"})
+	if !inbox.visualMode || inbox.list.Index() != 1 || inbox.selectedUIDs[13] != "account-1" {
+		t.Fatalf("could not select loaded hidden mail: visual=%v index=%d selected=%v", inbox.visualMode, inbox.list.Index(), inbox.selectedUIDs)
+	}
+	hidden.emailsByFolder["INBOX"] = append(hidden.emailsByFolder["INBOX"],
+		fetcher.Email{UID: 2, AccountID: "account-1", Subject: "Another unrelated update"},
+	)
+	inbox.Update(LocalSearchIndexChangedMsg{})
+	if !inbox.visualMode || inbox.list.Index() != 1 || inbox.selectedUIDs[13] != "account-1" || len(inbox.selectionOrder) != 1 || inbox.selectionOrder[0] != 13 {
+		t.Fatalf("unchanged hidden results lost selection: visual=%v index=%d selected=%v order=%v", inbox.visualMode, inbox.list.Index(), inbox.selectedUIDs, inbox.selectionOrder)
+	}
+
+	inbox.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
+	if inbox.hiddenView || inbox.searchActive || inbox.hiddenStatus != "" || len(inbox.searchResults) != 0 {
+		t.Fatalf("account transition retained the previous hidden view: hidden=%v active=%v status=%q results=%+v", inbox.hiddenView, inbox.searchActive, inbox.hiddenStatus, inbox.searchResults)
+	}
+	_, cmd = inbox.Update(tea.KeyPressMsg{Code: 'H', Text: "H"})
+	msgs = collectMsgs(cmd)
+	if len(msgs) != 1 {
+		t.Fatalf("new account load requests = %#v", msgs)
+	}
+	if opened, ok := msgs[0].(SearchOpenedMsg); !ok || opened.FolderName != "Archive" || opened.AccountID != "account-2" {
+		t.Fatalf("H requested the previous account: %#v", msgs[0])
+	}
+	if inbox.emailsCount != 1 || inbox.searchResults[0].UID != 23 || !strings.Contains(inbox.hiddenStatus, "1 hidden mail:") {
+		t.Fatalf("new account hidden view has the wrong scope: count=%d results=%+v status=%q", inbox.emailsCount, inbox.searchResults, inbox.hiddenStatus)
+	}
+	hidden.emailsByFolder["Archive"] = nil
+	inbox.Update(LocalSearchIndexChangedMsg{})
+	if !inbox.hiddenView || !inbox.searchActive || inbox.emailsCount != 0 || !strings.Contains(inbox.hiddenStatus, "0 hidden mails:") || strings.Contains(inbox.list.Title, "1 hidden") {
+		t.Fatalf("empty update did not refresh the hidden view: hidden=%v active=%v count=%d title=%q status=%q", inbox.hiddenView, inbox.searchActive, inbox.emailsCount, inbox.list.Title, inbox.hiddenStatus)
+	}
+}
+
+type fakeHiddenSearcher struct {
+	counts         map[string]int
+	emails         []fetcher.Email
+	emailsByFolder map[string][]fetcher.Email
+}
+
+func (f *fakeHiddenSearcher) HiddenCount(folder string, accountIDs []string) int {
+	if f.emailsByFolder != nil {
+		return len(f.Hidden(folder, accountIDs))
+	}
+	total := 0
+	for _, id := range accountIDs {
+		total += f.counts[id]
+	}
+	return total
+}
+
+func (f *fakeHiddenSearcher) Hidden(folder string, accountIDs []string) []fetcher.Email {
+	emails := f.emails
+	if f.emailsByFolder != nil {
+		emails = f.emailsByFolder[folder]
+	}
+	var result []fetcher.Email
+	for _, email := range emails {
+		for _, id := range accountIDs {
+			if email.AccountID == id {
+				result = append(result, email)
+				break
+			}
+		}
+	}
+	return result
+}
+
+func (*fakeHiddenSearcher) HiddenRecipients(string, string) []headerindex.AddressCount {
+	return nil
 }
 
 func TestInboxSearchResultsFilterByActiveAccountTab(t *testing.T) {

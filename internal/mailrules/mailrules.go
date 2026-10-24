@@ -70,12 +70,14 @@ func (runner *Runner) Run(accounts []config.Account, rules []config.MailRule) Re
 	seen := make(map[string]bool)
 	for _, account := range accounts {
 		var applicable []config.MailRule
+		hasActions := false
 		for _, rule := range rules {
 			if rule.Enabled && (rule.AccountID == "" || rule.AccountID == account.ID) {
 				applicable = append(applicable, rule)
+				hasActions = hasActions || rule.MoveTo != "" || rule.MarkRead
 			}
 		}
-		if len(applicable) == 0 {
+		if !hasActions {
 			continue
 		}
 		if account.ID == "" || seen[account.ID] {

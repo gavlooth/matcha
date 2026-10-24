@@ -10,4 +10,4 @@ This package is the SMTP client layer for Matcha. It:
 - Supports S/MIME detached signing and envelope encryption using PKCS#7
 - Handles SMTP authentication with both PLAIN and LOGIN mechanisms (fallback for servers like Mailo)
 - Supports both implicit TLS (port 465) and STARTTLS (other ports)
-- Generates unique Message-IDs and handles reply threading via `In-Reply-To` and `References` headers
+- Generates unique Message-IDs using the sender's domain, including when From contains a display name or reply alias, and handles reply threading via `In-Reply-To` and `References` headers

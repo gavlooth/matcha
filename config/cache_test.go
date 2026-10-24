@@ -21,10 +21,11 @@ func TestEmailCache_SaveLoadRoundTrip(t *testing.T) {
 	setup(t)
 
 	e1 := CachedEmail{
-		UID:     1,
-		From:    "t1@e.com",
-		To:      []string{"t2@e.com"},
-		Subject: "Hello",
+		UID:                1,
+		From:               "t1@e.com",
+		To:                 []string{"t2@e.com"},
+		DeliveryRecipients: []string{"alias@e.com"},
+		Subject:            "Hello",
 	}
 
 	e2 := CachedEmail{
@@ -54,6 +55,9 @@ func TestEmailCache_SaveLoadRoundTrip(t *testing.T) {
 		OU := output.Emails[i]
 		if IN.UID != OU.UID || IN.From != OU.From || !slices.Equal(IN.To, OU.To) || IN.Subject != OU.Subject {
 			t.Errorf("email[%d] mismatch: got %+v, want %+v", i, OU, IN)
+		}
+		if !slices.Equal(IN.DeliveryRecipients, OU.DeliveryRecipients) {
+			t.Errorf("email[%d] lost delivery recipients: got %v, want %v", i, OU.DeliveryRecipients, IN.DeliveryRecipients)
 		}
 	}
 }

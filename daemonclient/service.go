@@ -34,7 +34,7 @@ type Service interface {
 	MoveEmails(accountID string, uids []uint32, src, dst string) error
 	MarkRead(accountID, folder string, uids []uint32) error
 	MarkUnread(accountID, folder string, uids []uint32) error
-	QueueEmail(accountID string, to, cc, bcc []string, subject, body, htmlBody string, images map[string][]byte, attachments map[string][]byte, inReplyTo string, references []string, signSMIME, encryptSMIME, signPGP, encryptPGP bool, delaySeconds int, prebuiltRaw []byte) (string, error)
+	QueueEmail(accountID, fromOverride string, to, cc, bcc []string, subject, body, htmlBody string, images map[string][]byte, attachments map[string][]byte, inReplyTo string, references []string, signSMIME, encryptSMIME, signPGP, encryptPGP bool, delaySeconds int, prebuiltRaw []byte) (string, error)
 	CancelEmail(jobID string) error
 	FetchFolders(accountID string) ([]backend.Folder, error)
 	RefreshFolder(accountID, folder string) error
@@ -289,12 +289,13 @@ func (s *daemonService) MarkUnread(accountID, folder string, uids []uint32) erro
 	})
 }
 
-func (s *daemonService) QueueEmail(accountID string, to, cc, bcc []string, subject, body, htmlBody string, images map[string][]byte, attachments map[string][]byte, inReplyTo string, references []string, signSMIME, encryptSMIME, signPGP, encryptPGP bool, delaySeconds int, prebuiltRaw []byte) (string, error) {
+func (s *daemonService) QueueEmail(accountID, fromOverride string, to, cc, bcc []string, subject, body, htmlBody string, images map[string][]byte, attachments map[string][]byte, inReplyTo string, references []string, signSMIME, encryptSMIME, signPGP, encryptPGP bool, delaySeconds int, prebuiltRaw []byte) (string, error) {
 	var result daemonrpc.QueueEmailResult
 	err := s.call(func(c *Client) error {
 		return c.Call(daemonrpc.MethodQueueEmail, daemonrpc.QueueEmailParams{
 			Email: daemonrpc.SendEmailParams{
 				AccountID:    accountID,
+				FromOverride: fromOverride,
 				To:           to,
 				Cc:           cc,
 				Bcc:          bcc,
@@ -597,12 +598,17 @@ func (s *directService) Close() error {
 	return nil
 }
 
-func (s *directService) QueueEmail(accountID string, to, cc, bcc []string, subject, body, htmlBody string, images map[string][]byte, attachments map[string][]byte, inReplyTo string, references []string, signSMIME, encryptSMIME, signPGP, encryptPGP bool, _ int, prebuiltRaw []byte) (string, error) {
+func (s *directService) QueueEmail(accountID, fromOverride string, to, cc, bcc []string, subject, body, htmlBody string, images map[string][]byte, attachments map[string][]byte, inReplyTo string, references []string, signSMIME, encryptSMIME, signPGP, encryptPGP bool, _ int, prebuiltRaw []byte) (string, error) {
 	s.mu.RLock()
 	acct := s.cfg.GetAccountByID(accountID)
 	s.mu.RUnlock()
 	if acct == nil {
 		return "", fmt.Errorf("no account for %s", accountID)
+	}
+	if fromOverride != "" {
+		copy := *acct
+		copy.SendAsEmail = fromOverride
+		acct = &copy
 	}
 
 	var rawMsg []byte

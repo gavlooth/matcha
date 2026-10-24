@@ -143,19 +143,20 @@ func toBackendEmails(emails []fetcher.Email) []backend.Email {
 	result := make([]backend.Email, len(emails))
 	for i, e := range emails {
 		result[i] = backend.Email{
-			UID:         e.UID,
-			From:        e.From,
-			To:          e.To,
-			ReplyTo:     e.ReplyTo,
-			Subject:     e.Subject,
-			Body:        e.Body,
-			Date:        e.Date,
-			IsRead:      e.IsRead,
-			MessageID:   e.MessageID,
-			InReplyTo:   e.InReplyTo,
-			References:  e.References,
-			Attachments: toBackendAttachments(e.Attachments),
-			AccountID:   e.AccountID,
+			UID:                e.UID,
+			From:               e.From,
+			To:                 e.To,
+			DeliveryRecipients: e.DeliveryRecipients,
+			ReplyTo:            e.ReplyTo,
+			Subject:            e.Subject,
+			Body:               e.Body,
+			Date:               e.Date,
+			IsRead:             e.IsRead,
+			MessageID:          e.MessageID,
+			InReplyTo:          e.InReplyTo,
+			References:         e.References,
+			Attachments:        toBackendAttachments(e.Attachments),
+			AccountID:          e.AccountID,
 		}
 	}
 	return result

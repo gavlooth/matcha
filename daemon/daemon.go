@@ -412,16 +412,17 @@ func (d *Daemon) syncAllAccounts(ctx context.Context) {
 		var cached []config.CachedEmail
 		for _, e := range emails {
 			cached = append(cached, config.CachedEmail{
-				UID:        e.UID,
-				From:       e.From,
-				To:         e.To,
-				Subject:    e.Subject,
-				Date:       e.Date,
-				MessageID:  e.MessageID,
-				InReplyTo:  e.InReplyTo,
-				References: e.References,
-				AccountID:  e.AccountID,
-				IsRead:     e.IsRead,
+				UID:                e.UID,
+				From:               e.From,
+				To:                 e.To,
+				DeliveryRecipients: e.DeliveryRecipients,
+				Subject:            e.Subject,
+				Date:               e.Date,
+				MessageID:          e.MessageID,
+				InReplyTo:          e.InReplyTo,
+				References:         e.References,
+				AccountID:          e.AccountID,
+				IsRead:             e.IsRead,
 			})
 		}
 		if err := d.updateFolderCache(inboxFolder, acct.ID, cached); err != nil {
@@ -524,16 +525,17 @@ func (d *Daemon) fetchAndCache(accountID, folder string) {
 	var cached []config.CachedEmail
 	for _, e := range emails {
 		cached = append(cached, config.CachedEmail{
-			UID:        e.UID,
-			From:       e.From,
-			To:         e.To,
-			Subject:    e.Subject,
-			Date:       e.Date,
-			MessageID:  e.MessageID,
-			InReplyTo:  e.InReplyTo,
-			References: e.References,
-			AccountID:  e.AccountID,
-			IsRead:     e.IsRead,
+			UID:                e.UID,
+			From:               e.From,
+			To:                 e.To,
+			DeliveryRecipients: e.DeliveryRecipients,
+			Subject:            e.Subject,
+			Date:               e.Date,
+			MessageID:          e.MessageID,
+			InReplyTo:          e.InReplyTo,
+			References:         e.References,
+			AccountID:          e.AccountID,
+			IsRead:             e.IsRead,
 		})
 	}
 
@@ -612,6 +614,11 @@ func (d *Daemon) sendOutboxEntry(entry *OutboxEntry) {
 	if acct == nil {
 		log.Printf("daemon: outbox send failed, no account for %s", entry.Params.AccountID)
 		return
+	}
+	if entry.Params.FromOverride != "" {
+		copy := *acct
+		copy.SendAsEmail = entry.Params.FromOverride
+		acct = &copy
 	}
 
 	var rawMsg []byte

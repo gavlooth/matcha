@@ -92,7 +92,8 @@ type Composer struct {
 	accounts           []config.Account
 	selectedAccountIdx int
 	showAccountPicker  bool
-	fromInput          textinput.Model // editable From when account is catch-all
+	fromInput          textinput.Model
+	fromOverrideSet    bool
 
 	// Contact suggestions
 	suggestions        []config.Contact
@@ -251,7 +252,7 @@ func (m *Composer) hasAnyRecipient() bool {
 }
 
 func (m *Composer) validateFromField() bool { //nolint:unparam
-	if !m.isCatchAllAccount() {
+	if !m.isCatchAllAccount() && !m.fromOverrideSet {
 		m.fromError = ""
 		return true
 	}
@@ -549,9 +550,10 @@ func (m *Composer) ResetConfirmation() {
 	m.confirmingExit = false
 }
 
-// SetFromOverride pre-fills the editable From field (used for catch-all replies).
+// SetFromOverride pre-fills the From field for replies.
 func (m *Composer) SetFromOverride(addr string) {
 	m.fromInput.SetValue(addr)
+	m.fromOverrideSet = true
 }
 
 // SetSpellcheckOptions toggles spellcheck features for this composer. Pass
@@ -1167,14 +1169,12 @@ func (m *Composer) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 			switch msg.String() {
 			case "up", "k":
 				if m.selectedAccountIdx > 0 {
-					m.selectedAccountIdx--
-					m.updateSignature()
+					m.SetSelectedAccount(m.accounts[m.selectedAccountIdx-1].ID)
 					m.updatePGPDefaults()
 				}
 			case keyDown, "j":
 				if m.selectedAccountIdx < len(m.accounts)-1 {
-					m.selectedAccountIdx++
-					m.updateSignature()
+					m.SetSelectedAccount(m.accounts[m.selectedAccountIdx+1].ID)
 					m.updatePGPDefaults()
 				}
 			case keyEnter:
@@ -1397,7 +1397,7 @@ func (m *Composer) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 						accountID = acc.ID
 					}
 					fromOverride := ""
-					if m.isCatchAllAccount() {
+					if m.isCatchAllAccount() || m.fromOverrideSet {
 						fromOverride = m.fromInput.Value()
 					}
 					return m, func() tea.Msg {
@@ -1530,7 +1530,7 @@ func (m *Composer) View() tea.View { //nolint:gocyclo
 	// From field with account selector
 	fromAddr := m.getFromAddress()
 	var fromField string
-	if m.isCatchAllAccount() { //nolint:gocritic
+	if m.isCatchAllAccount() || m.fromOverrideSet { //nolint:gocritic
 		fromAddrView := m.fromInput.View()
 		if len(m.accounts) > 1 {
 			if m.focusIndex == focusFrom {
@@ -2009,6 +2009,9 @@ func (m *Composer) SetAccounts(accounts []config.Account) {
 func (m *Composer) SetSelectedAccount(accountID string) {
 	for i, acc := range m.accounts {
 		if acc.ID == accountID {
+			if i != m.selectedAccountIdx {
+				m.fromOverrideSet = false
+			}
 			m.selectedAccountIdx = i
 			m.updateSignature()
 			return
@@ -2172,6 +2175,10 @@ func (m *Composer) HasContent() bool {
 
 // ToDraft converts the composer state to a Draft for saving.
 func (m *Composer) ToDraft() config.Draft {
+	fromOverride := ""
+	if m.isCatchAllAccount() || m.fromOverrideSet {
+		fromOverride = m.fromInput.Value()
+	}
 	return config.Draft{
 		ID:              m.draftID,
 		To:              m.toInput.Value(),
@@ -2181,7 +2188,7 @@ func (m *Composer) ToDraft() config.Draft {
 		Body:            m.bodyInput.Value(),
 		AttachmentPaths: m.attachmentPaths,
 		AccountID:       m.GetSelectedAccountID(),
-		FromOverride:    m.fromInput.Value(),
+		FromOverride:    fromOverride,
 		InReplyTo:       m.inReplyTo,
 		References:      m.references,
 		QuotedText:      m.quotedText,
@@ -2204,8 +2211,8 @@ func NewComposerFromDraft(draft config.Draft, accounts []config.Account, hideTip
 		m.attachmentNames[path] = formatAttachmentName(path)
 	}
 	m.clampAttachmentCursor()
-	if m.isCatchAllAccount() && draft.FromOverride != "" {
-		m.fromInput.SetValue(draft.FromOverride)
+	if draft.FromOverride != "" {
+		m.SetFromOverride(draft.FromOverride)
 	}
 	m.inReplyTo = draft.InReplyTo
 	m.references = draft.References

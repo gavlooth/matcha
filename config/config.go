@@ -97,6 +97,23 @@ type Account struct {
 	// only in Bcc. An entry is an address ("prof@uni.edu") or a domain
 	// ("uni.edu", which also covers its subdomains).
 	AlwaysShowMailFrom []string `json:"always_show_mail_from,omitempty"`
+	// ShowUnaddressedMail shows mail whose To, Cc and delivery headers name
+	// none of the addresses of any configured account (including their
+	// ExtraAddresses), such as Bcc mail. Mail naming another configured
+	// account stays with that account.
+	ShowUnaddressedMail bool `json:"show_unaddressed_mail,omitempty"`
+	// DiscoverExtraAddresses opts into adding addresses used to send mail
+	// at least three times and named by at least three hidden INBOX messages.
+	// This is a heuristic, not proof that an address belongs to the user.
+	DiscoverExtraAddresses bool `json:"discover_extra_addresses,omitempty"`
+	// IgnoredAddresses are addresses the user removed from ExtraAddresses or
+	// declined as suggestions; they are never added or suggested again.
+	IgnoredAddresses []string `json:"ignored_addresses,omitempty"`
+
+	// OtherAccountAddresses holds the fetch and extra addresses of every other
+	// configured account, lowercased. It is filled by
+	// Config.RefreshOtherAccountAddresses and never saved.
+	OtherAccountAddresses []string `json:"-"`
 
 	SC *SessionCache `json:"-"` // "-" prevents the SessionCache from being saved to config.json
 
@@ -631,39 +648,42 @@ func configFile() (string, error) {
 
 // secureDiskAccount includes the Password field in JSON when secure mode is active.
 type secureDiskAccount struct {
-	ID                 string   `json:"id"`
-	Name               string   `json:"name"`
-	Email              string   `json:"email"`
-	Password           string   `json:"password,omitempty"`
-	ServiceProvider    string   `json:"service_provider"`
-	FetchEmail         string   `json:"fetch_email,omitempty"`
-	SendAsEmail        string   `json:"send_as_email,omitempty"`
-	IMAPServer         string   `json:"imap_server,omitempty"`
-	IMAPPort           int      `json:"imap_port,omitempty"`
-	SMTPServer         string   `json:"smtp_server,omitempty"`
-	SMTPPort           int      `json:"smtp_port,omitempty"`
-	Insecure           bool     `json:"insecure,omitempty"`
-	SMTPUsername       string   `json:"smtp_username,omitempty"`
-	SMTPPassword       string   `json:"smtp_password,omitempty"`
-	SMIMECert          string   `json:"smime_cert,omitempty"`
-	SMIMEKey           string   `json:"smime_key,omitempty"`
-	SMIMESignByDefault bool     `json:"smime_sign_by_default,omitempty"`
-	PGPPublicKey       string   `json:"pgp_public_key,omitempty"`
-	PGPPrivateKey      string   `json:"pgp_private_key,omitempty"`
-	PGPKeySource       string   `json:"pgp_key_source,omitempty"`
-	PGPPIN             string   `json:"pgp_pin,omitempty"`
-	PGPSignByDefault   bool     `json:"pgp_sign_by_default,omitempty"`
-	AuthMethod         string   `json:"auth_method,omitempty"`
-	OAuthTokenCmd      string   `json:"oauth_token_cmd,omitempty"`
-	PassCmd            string   `json:"pass_cmd,omitempty"`
-	Protocol           string   `json:"protocol,omitempty"`
-	JMAPEndpoint       string   `json:"jmap_endpoint,omitempty"`
-	POP3Server         string   `json:"pop3_server,omitempty"`
-	POP3Port           int      `json:"pop3_port,omitempty"`
-	MaildirPath        string   `json:"maildir_path,omitempty"`
-	CatchAll           bool     `json:"catch_all,omitempty"`
-	ExtraAddresses     []string `json:"extra_addresses,omitempty"`
-	AlwaysShowMailFrom []string `json:"always_show_mail_from,omitempty"`
+	ID                     string   `json:"id"`
+	Name                   string   `json:"name"`
+	Email                  string   `json:"email"`
+	Password               string   `json:"password,omitempty"`
+	ServiceProvider        string   `json:"service_provider"`
+	FetchEmail             string   `json:"fetch_email,omitempty"`
+	SendAsEmail            string   `json:"send_as_email,omitempty"`
+	IMAPServer             string   `json:"imap_server,omitempty"`
+	IMAPPort               int      `json:"imap_port,omitempty"`
+	SMTPServer             string   `json:"smtp_server,omitempty"`
+	SMTPPort               int      `json:"smtp_port,omitempty"`
+	Insecure               bool     `json:"insecure,omitempty"`
+	SMTPUsername           string   `json:"smtp_username,omitempty"`
+	SMTPPassword           string   `json:"smtp_password,omitempty"`
+	SMIMECert              string   `json:"smime_cert,omitempty"`
+	SMIMEKey               string   `json:"smime_key,omitempty"`
+	SMIMESignByDefault     bool     `json:"smime_sign_by_default,omitempty"`
+	PGPPublicKey           string   `json:"pgp_public_key,omitempty"`
+	PGPPrivateKey          string   `json:"pgp_private_key,omitempty"`
+	PGPKeySource           string   `json:"pgp_key_source,omitempty"`
+	PGPPIN                 string   `json:"pgp_pin,omitempty"`
+	PGPSignByDefault       bool     `json:"pgp_sign_by_default,omitempty"`
+	AuthMethod             string   `json:"auth_method,omitempty"`
+	OAuthTokenCmd          string   `json:"oauth_token_cmd,omitempty"`
+	PassCmd                string   `json:"pass_cmd,omitempty"`
+	Protocol               string   `json:"protocol,omitempty"`
+	JMAPEndpoint           string   `json:"jmap_endpoint,omitempty"`
+	POP3Server             string   `json:"pop3_server,omitempty"`
+	POP3Port               int      `json:"pop3_port,omitempty"`
+	MaildirPath            string   `json:"maildir_path,omitempty"`
+	CatchAll               bool     `json:"catch_all,omitempty"`
+	ExtraAddresses         []string `json:"extra_addresses,omitempty"`
+	AlwaysShowMailFrom     []string `json:"always_show_mail_from,omitempty"`
+	ShowUnaddressedMail    bool     `json:"show_unaddressed_mail,omitempty"`
+	DiscoverExtraAddresses bool     `json:"discover_extra_addresses,omitempty"`
+	IgnoredAddresses       []string `json:"ignored_addresses,omitempty"`
 }
 
 type secureDiskConfig struct {
@@ -695,6 +715,7 @@ type secureDiskConfig struct {
 
 // SaveConfig saves the given configuration to the config file and passwords to the keyring.
 func SaveConfig(config *Config) error {
+	config.RefreshOtherAccountAddresses()
 	secureMode := GetSessionKey() != nil
 
 	if !secureMode {
@@ -763,39 +784,42 @@ func SaveConfig(config *Config) error {
 				securePassword = acc.Password
 			}
 			sdc.Accounts = append(sdc.Accounts, secureDiskAccount{
-				ID:                 acc.ID,
-				Name:               acc.Name,
-				Email:              acc.Email,
-				Password:           securePassword,
-				ServiceProvider:    acc.ServiceProvider,
-				FetchEmail:         acc.FetchEmail,
-				SendAsEmail:        acc.SendAsEmail,
-				IMAPServer:         acc.IMAPServer,
-				IMAPPort:           acc.IMAPPort,
-				SMTPServer:         acc.SMTPServer,
-				SMTPPort:           acc.SMTPPort,
-				Insecure:           acc.Insecure,
-				SMTPUsername:       acc.SMTPUsername,
-				SMTPPassword:       acc.SMTPPassword,
-				SMIMECert:          acc.SMIMECert,
-				SMIMEKey:           acc.SMIMEKey,
-				SMIMESignByDefault: acc.SMIMESignByDefault,
-				PGPPublicKey:       acc.PGPPublicKey,
-				PGPPrivateKey:      acc.PGPPrivateKey,
-				PGPKeySource:       acc.PGPKeySource,
-				PGPPIN:             acc.PGPPIN,
-				PGPSignByDefault:   acc.PGPSignByDefault,
-				AuthMethod:         acc.AuthMethod,
-				OAuthTokenCmd:      acc.OAuthTokenCmd,
-				PassCmd:            acc.PassCmd,
-				Protocol:           acc.Protocol,
-				JMAPEndpoint:       acc.JMAPEndpoint,
-				POP3Server:         acc.POP3Server,
-				POP3Port:           acc.POP3Port,
-				MaildirPath:        acc.MaildirPath,
-				CatchAll:           acc.CatchAll,
-				ExtraAddresses:     acc.ExtraAddresses,
-				AlwaysShowMailFrom: acc.AlwaysShowMailFrom,
+				ID:                     acc.ID,
+				Name:                   acc.Name,
+				Email:                  acc.Email,
+				Password:               securePassword,
+				ServiceProvider:        acc.ServiceProvider,
+				FetchEmail:             acc.FetchEmail,
+				SendAsEmail:            acc.SendAsEmail,
+				IMAPServer:             acc.IMAPServer,
+				IMAPPort:               acc.IMAPPort,
+				SMTPServer:             acc.SMTPServer,
+				SMTPPort:               acc.SMTPPort,
+				Insecure:               acc.Insecure,
+				SMTPUsername:           acc.SMTPUsername,
+				SMTPPassword:           acc.SMTPPassword,
+				SMIMECert:              acc.SMIMECert,
+				SMIMEKey:               acc.SMIMEKey,
+				SMIMESignByDefault:     acc.SMIMESignByDefault,
+				PGPPublicKey:           acc.PGPPublicKey,
+				PGPPrivateKey:          acc.PGPPrivateKey,
+				PGPKeySource:           acc.PGPKeySource,
+				PGPPIN:                 acc.PGPPIN,
+				PGPSignByDefault:       acc.PGPSignByDefault,
+				AuthMethod:             acc.AuthMethod,
+				OAuthTokenCmd:          acc.OAuthTokenCmd,
+				PassCmd:                acc.PassCmd,
+				Protocol:               acc.Protocol,
+				JMAPEndpoint:           acc.JMAPEndpoint,
+				POP3Server:             acc.POP3Server,
+				POP3Port:               acc.POP3Port,
+				MaildirPath:            acc.MaildirPath,
+				CatchAll:               acc.CatchAll,
+				ExtraAddresses:         acc.ExtraAddresses,
+				AlwaysShowMailFrom:     acc.AlwaysShowMailFrom,
+				ShowUnaddressedMail:    acc.ShowUnaddressedMail,
+				DiscoverExtraAddresses: acc.DiscoverExtraAddresses,
+				IgnoredAddresses:       acc.IgnoredAddresses,
 			})
 		}
 		data, err = json.MarshalIndent(sdc, "", "  ")
@@ -832,39 +856,42 @@ func LoadConfig() (*Config, error) {
 	var needsMigration bool
 
 	type rawAccount struct {
-		ID                 string   `json:"id"`
-		Name               string   `json:"name"`
-		Email              string   `json:"email"`
-		Password           string   `json:"password,omitempty"`
-		ServiceProvider    string   `json:"service_provider"`
-		FetchEmail         string   `json:"fetch_email,omitempty"`
-		SendAsEmail        string   `json:"send_as_email,omitempty"`
-		IMAPServer         string   `json:"imap_server,omitempty"`
-		IMAPPort           int      `json:"imap_port,omitempty"`
-		SMTPServer         string   `json:"smtp_server,omitempty"`
-		SMTPPort           int      `json:"smtp_port,omitempty"`
-		Insecure           bool     `json:"insecure,omitempty"`
-		SMTPUsername       string   `json:"smtp_username,omitempty"`
-		SMTPPassword       string   `json:"smtp_password,omitempty"`
-		SMIMECert          string   `json:"smime_cert,omitempty"`
-		SMIMEKey           string   `json:"smime_key,omitempty"`
-		SMIMESignByDefault bool     `json:"smime_sign_by_default,omitempty"`
-		PGPPublicKey       string   `json:"pgp_public_key,omitempty"`
-		PGPPrivateKey      string   `json:"pgp_private_key,omitempty"`
-		PGPKeySource       string   `json:"pgp_key_source,omitempty"`
-		PGPPIN             string   `json:"pgp_pin,omitempty"`
-		PGPSignByDefault   bool     `json:"pgp_sign_by_default,omitempty"`
-		AuthMethod         string   `json:"auth_method,omitempty"`
-		OAuthTokenCmd      string   `json:"oauth_token_cmd,omitempty"`
-		PassCmd            string   `json:"pass_cmd,omitempty"`
-		Protocol           string   `json:"protocol,omitempty"`
-		JMAPEndpoint       string   `json:"jmap_endpoint,omitempty"`
-		POP3Server         string   `json:"pop3_server,omitempty"`
-		POP3Port           int      `json:"pop3_port,omitempty"`
-		MaildirPath        string   `json:"maildir_path,omitempty"`
-		CatchAll           bool     `json:"catch_all,omitempty"`
-		ExtraAddresses     []string `json:"extra_addresses,omitempty"`
-		AlwaysShowMailFrom []string `json:"always_show_mail_from,omitempty"`
+		ID                     string   `json:"id"`
+		Name                   string   `json:"name"`
+		Email                  string   `json:"email"`
+		Password               string   `json:"password,omitempty"`
+		ServiceProvider        string   `json:"service_provider"`
+		FetchEmail             string   `json:"fetch_email,omitempty"`
+		SendAsEmail            string   `json:"send_as_email,omitempty"`
+		IMAPServer             string   `json:"imap_server,omitempty"`
+		IMAPPort               int      `json:"imap_port,omitempty"`
+		SMTPServer             string   `json:"smtp_server,omitempty"`
+		SMTPPort               int      `json:"smtp_port,omitempty"`
+		Insecure               bool     `json:"insecure,omitempty"`
+		SMTPUsername           string   `json:"smtp_username,omitempty"`
+		SMTPPassword           string   `json:"smtp_password,omitempty"`
+		SMIMECert              string   `json:"smime_cert,omitempty"`
+		SMIMEKey               string   `json:"smime_key,omitempty"`
+		SMIMESignByDefault     bool     `json:"smime_sign_by_default,omitempty"`
+		PGPPublicKey           string   `json:"pgp_public_key,omitempty"`
+		PGPPrivateKey          string   `json:"pgp_private_key,omitempty"`
+		PGPKeySource           string   `json:"pgp_key_source,omitempty"`
+		PGPPIN                 string   `json:"pgp_pin,omitempty"`
+		PGPSignByDefault       bool     `json:"pgp_sign_by_default,omitempty"`
+		AuthMethod             string   `json:"auth_method,omitempty"`
+		OAuthTokenCmd          string   `json:"oauth_token_cmd,omitempty"`
+		PassCmd                string   `json:"pass_cmd,omitempty"`
+		Protocol               string   `json:"protocol,omitempty"`
+		JMAPEndpoint           string   `json:"jmap_endpoint,omitempty"`
+		POP3Server             string   `json:"pop3_server,omitempty"`
+		POP3Port               int      `json:"pop3_port,omitempty"`
+		MaildirPath            string   `json:"maildir_path,omitempty"`
+		CatchAll               bool     `json:"catch_all,omitempty"`
+		ExtraAddresses         []string `json:"extra_addresses,omitempty"`
+		AlwaysShowMailFrom     []string `json:"always_show_mail_from,omitempty"`
+		ShowUnaddressedMail    bool     `json:"show_unaddressed_mail,omitempty"`
+		DiscoverExtraAddresses bool     `json:"discover_extra_addresses,omitempty"`
+		IgnoredAddresses       []string `json:"ignored_addresses,omitempty"`
 	}
 	type diskConfig struct {
 		Accounts                []rawAccount                      `json:"accounts"`
@@ -945,37 +972,40 @@ func LoadConfig() (*Config, error) {
 
 	for _, rawAcc := range raw.Accounts {
 		acc := Account{
-			ID:                 rawAcc.ID,
-			Name:               rawAcc.Name,
-			Email:              rawAcc.Email,
-			ServiceProvider:    rawAcc.ServiceProvider,
-			FetchEmail:         rawAcc.FetchEmail,
-			SendAsEmail:        rawAcc.SendAsEmail,
-			IMAPServer:         rawAcc.IMAPServer,
-			IMAPPort:           rawAcc.IMAPPort,
-			SMTPServer:         rawAcc.SMTPServer,
-			SMTPPort:           rawAcc.SMTPPort,
-			Insecure:           rawAcc.Insecure,
-			SMTPUsername:       rawAcc.SMTPUsername,
-			SMIMECert:          rawAcc.SMIMECert,
-			SMIMEKey:           rawAcc.SMIMEKey,
-			SMIMESignByDefault: rawAcc.SMIMESignByDefault,
-			PGPPublicKey:       rawAcc.PGPPublicKey,
-			PGPPrivateKey:      rawAcc.PGPPrivateKey,
-			PGPKeySource:       rawAcc.PGPKeySource,
-			PGPSignByDefault:   rawAcc.PGPSignByDefault,
-			AuthMethod:         rawAcc.AuthMethod,
-			OAuthTokenCmd:      rawAcc.OAuthTokenCmd,
-			PassCmd:            rawAcc.PassCmd,
-			Protocol:           rawAcc.Protocol,
-			JMAPEndpoint:       rawAcc.JMAPEndpoint,
-			POP3Server:         rawAcc.POP3Server,
-			POP3Port:           rawAcc.POP3Port,
-			MaildirPath:        rawAcc.MaildirPath,
-			CatchAll:           rawAcc.CatchAll,
-			ExtraAddresses:     rawAcc.ExtraAddresses,
-			AlwaysShowMailFrom: rawAcc.AlwaysShowMailFrom,
-			SC:                 &SessionCache{},
+			ID:                     rawAcc.ID,
+			Name:                   rawAcc.Name,
+			Email:                  rawAcc.Email,
+			ServiceProvider:        rawAcc.ServiceProvider,
+			FetchEmail:             rawAcc.FetchEmail,
+			SendAsEmail:            rawAcc.SendAsEmail,
+			IMAPServer:             rawAcc.IMAPServer,
+			IMAPPort:               rawAcc.IMAPPort,
+			SMTPServer:             rawAcc.SMTPServer,
+			SMTPPort:               rawAcc.SMTPPort,
+			Insecure:               rawAcc.Insecure,
+			SMTPUsername:           rawAcc.SMTPUsername,
+			SMIMECert:              rawAcc.SMIMECert,
+			SMIMEKey:               rawAcc.SMIMEKey,
+			SMIMESignByDefault:     rawAcc.SMIMESignByDefault,
+			PGPPublicKey:           rawAcc.PGPPublicKey,
+			PGPPrivateKey:          rawAcc.PGPPrivateKey,
+			PGPKeySource:           rawAcc.PGPKeySource,
+			PGPSignByDefault:       rawAcc.PGPSignByDefault,
+			AuthMethod:             rawAcc.AuthMethod,
+			OAuthTokenCmd:          rawAcc.OAuthTokenCmd,
+			PassCmd:                rawAcc.PassCmd,
+			Protocol:               rawAcc.Protocol,
+			JMAPEndpoint:           rawAcc.JMAPEndpoint,
+			POP3Server:             rawAcc.POP3Server,
+			POP3Port:               rawAcc.POP3Port,
+			MaildirPath:            rawAcc.MaildirPath,
+			CatchAll:               rawAcc.CatchAll,
+			ExtraAddresses:         rawAcc.ExtraAddresses,
+			AlwaysShowMailFrom:     rawAcc.AlwaysShowMailFrom,
+			ShowUnaddressedMail:    rawAcc.ShowUnaddressedMail,
+			DiscoverExtraAddresses: rawAcc.DiscoverExtraAddresses,
+			IgnoredAddresses:       rawAcc.IgnoredAddresses,
+			SC:                     &SessionCache{},
 		}
 
 		// Validate PGPKeySource
@@ -1034,6 +1064,7 @@ func LoadConfig() (*Config, error) {
 		}
 	}
 
+	config.RefreshOtherAccountAddresses()
 	return &config, nil
 }
 
@@ -1064,6 +1095,29 @@ func (c *Config) AddAccount(account Account) {
 		account.FetchEmail = account.Email
 	}
 	c.Accounts = append(c.Accounts, account)
+}
+
+// RefreshOtherAccountAddresses fills every account's OtherAccountAddresses
+// from the fetch and extra addresses of the other accounts. Call it after the
+// accounts or their addresses change; LoadConfig and SaveConfig call it.
+func (c *Config) RefreshOtherAccountAddresses() {
+	own := make([][]string, len(c.Accounts))
+	for i, acc := range c.Accounts {
+		for _, address := range append([]string{acc.GetFetchEmail()}, acc.ExtraAddresses...) {
+			if address = strings.ToLower(strings.TrimSpace(address)); address != "" {
+				own[i] = append(own[i], address)
+			}
+		}
+	}
+	for i := range c.Accounts {
+		var others []string
+		for j := range c.Accounts {
+			if j != i {
+				others = append(others, own[j]...)
+			}
+		}
+		c.Accounts[i].OtherAccountAddresses = others
+	}
 }
 
 // RemoveAccount removes an account by its ID and deletes its password from the keyring.

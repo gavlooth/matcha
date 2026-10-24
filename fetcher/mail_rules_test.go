@@ -435,3 +435,87 @@ func TestMailRulesMissingDestinationPreservesFailedUID(t *testing.T) {
 		t.Fatal("missing destination triggered global expunge")
 	}
 }
+
+func TestShowRuleLeavesMailUntouchedUnlessReadActionIsSelected(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	client, _ := mailRuleIMAP(t, true)
+	account := &config.Account{ID: "show-account", Email: "me@example.com"}
+	rule := config.MailRule{ID: "show-news", Name: "Course mail", Enabled: true, AccountID: account.ID, Subject: "course", ShowInAccount: true}
+	appendMessage(t, client, "INBOX", "teacher@example.com", "old course")
+	if err := config.SaveMailRules([]config.MailRule{rule}); err != nil {
+		t.Fatal(err)
+	}
+	previousDial := imapPool.dial
+	imapPool.dial = func(*config.Account) (*imapclient.Client, error) { return client, nil }
+	t.Cleanup(func() {
+		imapPool.dial = previousDial
+		CloseIMAPPool()
+	})
+	shown, err := ApplyMailRules(account, []config.MailRule{rule}, MailRuleProgress{})
+	if err != nil || shown.Changed {
+		t.Fatalf("show-only rule performed an action: %+v, %v", shown, err)
+	}
+	rule.MarkRead = true
+	if err := config.SaveMailRules([]config.MailRule{rule}); err != nil {
+		t.Fatal(err)
+	}
+	baseline, err := ApplyMailRules(account, []config.MailRule{rule}, MailRuleProgress{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendMessage(t, client, "INBOX", "teacher@example.com", "new course")
+	applied, err := ApplyMailRules(account, []config.MailRule{rule}, baseline.Progress)
+	if err != nil || !applied.Changed {
+		t.Fatalf("combined show/read rule did not act on new hidden mail: %+v, %v", applied, err)
+	}
+	if _, err := client.Select("INBOX", &imap.SelectOptions{ReadOnly: true}).Wait(); err != nil {
+		t.Fatal(err)
+	}
+	messages, err := client.Fetch(imap.UIDSetNum(1, 2), &imap.FetchOptions{UID: true, Flags: true}).Collect()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 2 {
+		t.Fatalf("show rule removed mail: got %d messages", len(messages))
+	}
+	for _, message := range messages {
+		if seen := hasSeenFlag(message.Flags); seen != (message.UID == 2) {
+			t.Errorf("UID %d read=%v; old mail must stay unread and only new mail marked read", message.UID, seen)
+		}
+	}
+}
+
+func TestShowOnlyRuleStopsLaterReadAction(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	client, _ := mailRuleIMAP(t, true)
+	account := &config.Account{ID: "show-first", Email: "me@example.com"}
+	rules := []config.MailRule{
+		{ID: "show", Name: "Keep course unread", Enabled: true, Subject: "course", ShowInAccount: true},
+		{ID: "read", Name: "Read course", Enabled: true, Subject: "course", MarkRead: true},
+	}
+	if err := config.SaveMailRules(rules); err != nil {
+		t.Fatal(err)
+	}
+	previousDial := imapPool.dial
+	imapPool.dial = func(*config.Account) (*imapclient.Client, error) { return client, nil }
+	t.Cleanup(func() {
+		imapPool.dial = previousDial
+		CloseIMAPPool()
+	})
+	baseline, err := ApplyMailRules(account, rules, MailRuleProgress{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendMessage(t, client, "INBOX", "teacher@example.com", "course")
+	batch, err := ApplyMailRules(account, rules, baseline.Progress)
+	if err != nil || batch.Changed {
+		t.Fatalf("later read action ran despite first show-only match: %+v, %v", batch, err)
+	}
+	messages, err := client.Fetch(imap.UIDSetNum(1), &imap.FetchOptions{Flags: true}).Collect()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 1 || hasSeenFlag(messages[0].Flags) {
+		t.Fatal("show-only match did not keep the message present and unread")
+	}
+}

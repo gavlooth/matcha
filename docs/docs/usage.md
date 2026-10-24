@@ -33,7 +33,12 @@ On first launch, Matcha will prompt you to configure an email account. You'll ne
 - `d` - Delete selected email
 - `a` - Archive selected email
 - `v` - Enter visual mode (multi-select)
+- `H` - Show hidden mail for the open folder and account tab
 - `Esc` - Back to main menu
+
+Press `H` to list hidden mail in the open folder for the selected account tab. Hidden mail names none of that account's addresses. Open a message to read it normally. Add an address to **Extra Addresses**, add a sender or domain to **Always Show Mail From**, or create a show-in-account mail rule to make matching mail appear in the normal inbox.
+
+In **Settings → Accounts**, select an account and press `a` to open **Suggested addresses** from hidden To/Cc recipients. They are not verified aliases: add only addresses that belong to you, not teachers, mailing lists or other recipients. Press `Enter` to add the highlighted address to **Extra Addresses**, `x` to ignore it, or `Esc` to return. Use **Always Show Mail From** or a show-in-account rule for Bcc course mail.
 
 #### Visual Mode (Multi-Select)
 
@@ -103,7 +108,10 @@ Example: `from:alice invoice since:2026-01-01` finds mail from alice that mentio
   - On "Attachment" field: Open file picker
   - On "Send" button: Send email
 - `↑/↓` - Navigate contact suggestions (when typing in "To" field)
+
 - `Esc` - Save draft and exit
+
+Replies use the configured extra address named in the original To/Cc or delivery headers; the main fetch address takes precedence when both are present. The selected address is preserved in drafts and queued sends. Switching accounts clears the reply override and uses the new account's sender.
 
 ## Automatic Email Rules
 
@@ -111,11 +119,11 @@ Open **Settings → Rules** to manage local rules for your IMAP accounts. Rules 
 
 - Press `n` to create a rule, or select one and press `Enter` to edit it. New rules are disabled until you enable them.
 - Choose all configured accounts or one account. Add sender, recipient or subject conditions: matching uses case-insensitive substrings, and every nonempty condition must match. The recipient condition includes To and Cc.
-- Choose **Mark read**, a destination folder, or both. The destination must already exist in each affected account; moving requires the server's IMAP MOVE capability. Matcha never uses a move fallback that could expunge unrelated messages.
+- Choose **Show in this account even when not addressed to it**, **Mark read**, a destination folder, or any combination. Show rules make matching mail visible in the selected account without moving or marking it; show-only rules do not contact the mail server. A rule that combines show with move or mark-read still performs those actions.
 - Use `Tab`/`Shift+Tab` or `↑`/`↓` between form fields, `←`/`→` to choose an account, `Space`/`Enter` to toggle options, and `Ctrl+S` to save. `Esc` cancels editing.
-- In the rule list, `Space` enables/disables, `d` asks before deleting, uppercase `K`/`J` changes order, and `r` reloads saved definitions. The **first enabled matching rule wins**, even if it only marks the message read.
+- In the rule list, `Space` enables/disables, `d` asks before deleting, uppercase `K`/`J` changes order, and `r` reloads saved definitions. For move and mark-read processing, the **first enabled matching rule wins**, even if it only shows the message. Enabled show rules also determine visibility independently.
 
-Rules apply to **future incoming INBOX mail**, not messages already in your inbox. New, edited, reordered or newly enabled rules establish their starting point at the next background check, at most 30 seconds after saving. Mail already present at that check is left alone. After this starting point, unchanged rules also process mail that arrives while Matcha is closed when you open it again.
+Move and mark-read actions apply to **future incoming INBOX mail**, not messages already in your inbox. New, edited, reordered or newly enabled rules establish their starting point at the next background check, at most 30 seconds after saving. Mail already present at that check is left alone. After this starting point, unchanged rules also process mail that arrives while Matcha is closed when you open it again. The show-in-account setting also applies to existing mail when the inbox and local header copy refresh, within 30 seconds while the TUI is open.
 
 Each check processes at most 100 messages per applicable account, with further batches one second apart. Progress is saved between batches and across restarts. Multiple Matcha windows share a processing lock. Failed actions show an error and are retried at the normal 30-second interval without skipping the failed message; if marking read succeeds but moving fails, that message remains read.
 

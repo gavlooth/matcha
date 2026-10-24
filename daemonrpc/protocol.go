@@ -125,6 +125,7 @@ type AttachmentInfo struct {
 
 type SendEmailParams struct {
 	AccountID    string            `json:"account_id"`
+	FromOverride string            `json:"from_override,omitempty"`
 	To           []string          `json:"to"`
 	Cc           []string          `json:"cc,omitempty"`
 	Bcc          []string          `json:"bcc,omitempty"`

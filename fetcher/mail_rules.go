@@ -41,12 +41,14 @@ func ApplyMailRules(account *config.Account, rules []config.MailRule, progress M
 		return batch, err
 	}
 	var applicable []config.MailRule
+	hasActions := false
 	for _, rule := range rules {
 		if rule.Enabled && (rule.AccountID == "" || rule.AccountID == account.ID) {
 			applicable = append(applicable, rule)
+			hasActions = hasActions || rule.MoveTo != "" || rule.MarkRead
 		}
 	}
-	if len(applicable) == 0 {
+	if !hasActions {
 		return batch, nil
 	}
 	if account.Protocol != "" && account.Protocol != "imap" {

@@ -3,6 +3,7 @@ package fetchcmd
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -196,5 +197,23 @@ func TestSearchEmailsCmdOnlySearchesSelectedAccount(t *testing.T) {
 	}
 	if len(searched) != 1 || searched[0] != "b" {
 		t.Fatalf("searched accounts = %v, want [b]", searched)
+	}
+}
+
+func TestBackendSearchConversionKeepsDeliveryRecipients(t *testing.T) {
+	delivery := []string{"course@example.com"}
+	provider := &fakeSearchProvider{search: func(context.Context, string, backend.SearchQuery) ([]backend.Email, error) {
+		return []backend.Email{{
+			UID: 7, AccountID: "a", To: []string{"unrelated@example.net", "main@example.com"},
+			DeliveryRecipients: delivery,
+		}}, nil
+	}}
+	msg := SearchEmailsCmd(searchConfig("a"), resolverFor(map[string]backend.Provider{"a": provider}), backend.SearchQuery{Subject: "delivery"}, "INBOX", "a")()
+	result, ok := msg.(tui.SearchResultsMsg)
+	if !ok || result.Err != nil || len(result.Emails) != 1 {
+		t.Fatalf("search result = %#v", msg)
+	}
+	if !slices.Equal(result.Emails[0].DeliveryRecipients, delivery) {
+		t.Fatalf("backend search lost delivery recipients: %+v", result.Emails[0])
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"log"
 	"mime"
 	"mime/quotedprintable"
+	netmail "net/mail"
 	"net/textproto"
 	"os"
 	"regexp"
@@ -103,20 +104,21 @@ type Attachment struct {
 }
 
 type Email struct {
-	UID          uint32
-	From         string
-	To           []string
-	ReplyTo      []string
-	Subject      string
-	Body         string
-	BodyMIMEType string // mimeTextHTML or mimeTextPlain; empty when unknown (legacy cache rows). Lets the renderer skip markdown→HTML for already-HTML bodies.
-	Date         time.Time
-	IsRead       bool
-	MessageID    string
-	InReplyTo    string
-	References   []string
-	Attachments  []Attachment
-	AccountID    string // ID of the account this email belongs to
+	UID                uint32
+	From               string
+	To                 []string // Combined To and Cc recipients.
+	ReplyTo            []string
+	Subject            string
+	Body               string
+	BodyMIMEType       string // mimeTextHTML or mimeTextPlain; empty when unknown (legacy cache rows). Lets the renderer skip markdown→HTML for already-HTML bodies.
+	Date               time.Time
+	IsRead             bool
+	MessageID          string
+	InReplyTo          string
+	References         []string
+	Attachments        []Attachment
+	AccountID          string   // ID of the account this email belongs to
+	DeliveryRecipients []string // Recipients named by delivery headers, separate from To/Cc.
 }
 
 var headerMessageIDRE = regexp.MustCompile(`<[^>]+>`)
@@ -200,6 +202,33 @@ func headerMessageIDs(data []byte, key string) []string {
 		}
 	}
 	return ids
+}
+
+// deliveryRecipients preserves the addresses added by the receiving server.
+// Delivered-To is checked first so catch-all replies prefer the final delivery
+// address over forwarding headers and unrelated To/Cc recipients.
+func deliveryRecipients(data []byte) []string {
+	if len(data) == 0 {
+		return nil
+	}
+	reader := textproto.NewReader(bufio.NewReader(bytes.NewReader(data)))
+	headers, err := reader.ReadMIMEHeader()
+	if err != nil && len(headers) == 0 {
+		return nil
+	}
+	var recipients []string
+	for _, name := range deliveryHeaderNames {
+		for _, value := range headers.Values(name) {
+			addresses, err := netmail.ParseAddressList(value)
+			if err != nil {
+				continue
+			}
+			for _, address := range addresses {
+				recipients = append(recipients, address.Address)
+			}
+		}
+	}
+	return recipients
 }
 
 func firstEnvelopeInReplyTo(values []string) string {
@@ -603,26 +632,26 @@ func filterAndBuildBatchEmails(batchMsgs []*imapclient.FetchMessageBuffer, addre
 
 		headerData := msg.FindBodySection(deliveryHeaderSection)
 		batchEmails = append(batchEmails, Email{
-			UID:        uint32(msg.UID),
-			From:       fromAddr,
-			To:         toAddrList,
-			ReplyTo:    replyToAddrList,
-			Subject:    decodeHeader(msg.Envelope.Subject),
-			Date:       msg.Envelope.Date,
-			IsRead:     hasSeenFlag(msg.Flags),
-			MessageID:  msg.Envelope.MessageID,
-			InReplyTo:  firstEnvelopeInReplyTo(msg.Envelope.InReplyTo),
-			References: headerMessageIDs(headerData, "References"),
-			AccountID:  addresses.account.ID,
+			UID:                uint32(msg.UID),
+			From:               fromAddr,
+			To:                 toAddrList,
+			DeliveryRecipients: deliveryRecipients(headerData),
+			ReplyTo:            replyToAddrList,
+			Subject:            decodeHeader(msg.Envelope.Subject),
+			Date:               msg.Envelope.Date,
+			IsRead:             hasSeenFlag(msg.Flags),
+			MessageID:          msg.Envelope.MessageID,
+			InReplyTo:          firstEnvelopeInReplyTo(msg.Envelope.InReplyTo),
+			References:         headerMessageIDs(headerData, "References"),
+			AccountID:          addresses.account.ID,
 		})
 	}
 	return batchEmails
 }
 
-// messageMatchesAccount reports whether the account shows msg: in the Sent
-// folder when one of its addresses sent it, elsewhere when one of its
-// addresses is in To, Cc or a delivery header, or when the sender is one the
-// account always shows mail from.
+// messageMatchesAccount reports whether the account shows msg: in Sent when
+// one of its addresses sent it, or elsewhere when a recipient/delivery header,
+// visibility rule or account preference includes it.
 func messageMatchesAccount(msg *imapclient.FetchMessageBuffer, toAddrList []string, addresses accountAddresses, isSentMailbox bool, deliveryHeaderSection *imap.FetchItemBodySection) bool {
 	if addresses.account.CatchAll {
 		return true
@@ -637,10 +666,22 @@ func messageMatchesAccount(msg *imapclient.FetchMessageBuffer, toAddrList []stri
 	if slices.ContainsFunc(toAddrList, addresses.isOwn) {
 		return true
 	}
-	if addresses.namedInDeliveryHeaders(msg.FindBodySection(deliveryHeaderSection)) {
+	headers := msg.FindBodySection(deliveryHeaderSection)
+	if addresses.namedInDeliveryHeaders(headers) {
 		return true
 	}
-	return addresses.alwaysShowsMailFrom(senderEmail)
+	if addresses.alwaysShowsMailFrom(senderEmail) {
+		return true
+	}
+	if addresses.account.ShowUnaddressedMail && addresses.namesNoConfiguredAddress(toAddrList, headers) {
+		return true
+	}
+	for _, rule := range addresses.showRules {
+		if ruleMatchesEnvelope(rule, msg.Envelope) {
+			return true
+		}
+	}
+	return false
 }
 
 func FetchMailboxEmails(account *config.Account, mailbox string, limit, offset uint32) ([]Email, error) {
@@ -1852,16 +1893,17 @@ func FetchArchiveEmails(account *config.Account, limit, offset uint32) ([]Email,
 
 		headerData := msg.FindBodySection(deliveryHeaderSection)
 		emails = append(emails, Email{
-			UID:        uint32(msg.UID),
-			From:       fromAddr,
-			To:         toAddrList,
-			Subject:    decodeHeader(msg.Envelope.Subject),
-			Date:       msg.Envelope.Date,
-			IsRead:     hasSeenFlag(msg.Flags),
-			MessageID:  msg.Envelope.MessageID,
-			InReplyTo:  firstEnvelopeInReplyTo(msg.Envelope.InReplyTo),
-			References: headerMessageIDs(headerData, "References"),
-			AccountID:  account.ID,
+			UID:                uint32(msg.UID),
+			From:               fromAddr,
+			To:                 toAddrList,
+			DeliveryRecipients: deliveryRecipients(headerData),
+			Subject:            decodeHeader(msg.Envelope.Subject),
+			Date:               msg.Envelope.Date,
+			IsRead:             hasSeenFlag(msg.Flags),
+			MessageID:          msg.Envelope.MessageID,
+			InReplyTo:          firstEnvelopeInReplyTo(msg.Envelope.InReplyTo),
+			References:         headerMessageIDs(headerData, "References"),
+			AccountID:          account.ID,
 		})
 	}
 

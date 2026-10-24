@@ -12,6 +12,7 @@ import (
 	"github.com/floatpane/matcha/backend"
 	"github.com/floatpane/matcha/config"
 	"github.com/floatpane/matcha/fetcher"
+	"github.com/floatpane/matcha/internal/headerindex"
 	"github.com/floatpane/matcha/theme"
 )
 
@@ -31,6 +32,13 @@ type LocalSearcher interface {
 	Count(folder string, accountIDs []string) int
 	// Syncing reports whether the copy of the folder is being updated.
 	Syncing(folder string, accountIDs []string) bool
+}
+
+// HiddenSearcher reads hidden headers and recipient counts from the local copy.
+type HiddenSearcher interface {
+	HiddenCount(folder string, accountIDs []string) int
+	Hidden(folder string, accountIDs []string) []fetcher.Email
+	HiddenRecipients(accountID, folder string) []headerindex.AddressCount
 }
 
 // SearchHistory saves the queries the user searched for, newest first.

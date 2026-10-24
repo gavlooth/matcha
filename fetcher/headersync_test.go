@@ -11,6 +11,7 @@ import (
 	"github.com/emersion/go-imap/v2/imapclient"
 	"github.com/emersion/go-imap/v2/imapserver"
 	"github.com/emersion/go-imap/v2/imapserver/imapmemserver"
+	"github.com/floatpane/matcha/backend"
 	"github.com/floatpane/matcha/config"
 )
 
@@ -159,22 +160,46 @@ func TestSyncFolderHeadersStartsOverWhenUIDValidityChanges(t *testing.T) {
 	}
 }
 
-func TestSyncFolderHeadersRemembersMailForOtherAccounts(t *testing.T) {
+func TestSyncFolderHeadersKeepsHiddenMailUntilDeleted(t *testing.T) {
 	c := memIMAP(t)
 	account := &config.Account{ID: "a", Email: "me@example.com"}
 	appendMessage(t, c, "INBOX", "me@example.com", "mine")
-	appendMessage(t, c, "INBOX", "someone-else@example.com", "theirs")
+	appendMessage(t, c, "INBOX", "someone-else@example.com", "hidden")
 
-	headers, _, err := scanFolderHeaders(c, account, "INBOX", FolderHeaders{}, 10)
-	if err != nil {
+	headers, missing, err := scanFolderHeaders(c, account, "INBOX", FolderHeaders{}, 10)
+	if err != nil || len(missing) != 0 {
+		t.Fatalf("scan: missing %v, err %v", missing, err)
+	}
+	if len(headers.Emails) != 1 || len(headers.Hidden) != 1 || headers.Hidden[0].UID != 2 || headers.Hidden[0].Subject != "hidden" {
+		t.Fatalf("shown %v, hidden %v; want shown UID 1 and hidden UID 2", headerUIDs(headers), headers.Hidden)
+	}
+	headers, missing, err = scanFolderHeaders(c, account, "INBOX", headers, 10)
+	if err != nil || len(missing) != 0 || len(headers.Hidden) != 1 {
+		t.Fatalf("second scan fetched known hidden mail: hidden %v, missing %v, err %v", headers.Hidden, missing, err)
+	}
+
+	if _, err := c.Select("INBOX", nil).Wait(); err != nil {
 		t.Fatal(err)
 	}
-	if got := headerUIDs(headers); !slices.Equal(got, []uint32{1}) || !slices.Equal(headers.OtherUIDs, []uint32{2}) {
-		t.Fatalf("emails %v, other UIDs %v; want [1] and [2]", got, headers.OtherUIDs)
+	if err := c.Store(imap.UIDSetNum(2), &imap.StoreFlags{Op: imap.StoreFlagsAdd, Flags: []imap.Flag{imap.FlagSeen}}, nil).Close(); err != nil {
+		t.Fatal(err)
 	}
-	headers, missing, err := scanFolderHeaders(c, account, "INBOX", headers, 10)
-	if err != nil || len(missing) != 0 || len(headers.Emails) != 1 {
-		t.Fatalf("second scan: emails %d, missing %v, err %v; the other account's mail must not be fetched again", len(headers.Emails), missing, err)
+	headers, _, err = scanFolderHeaders(c, account, "INBOX", headers, 10)
+	if err != nil || !headers.Hidden[0].IsRead {
+		t.Fatalf("hidden read state not refreshed: %v, %v", headers.Hidden, err)
+	}
+	if _, err := c.Select("INBOX", nil).Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Store(imap.UIDSetNum(2), &imap.StoreFlags{Op: imap.StoreFlagsAdd, Flags: []imap.Flag{imap.FlagDeleted}}, nil).Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Expunge().Close(); err != nil {
+		t.Fatal(err)
+	}
+	headers, _, err = scanFolderHeaders(c, account, "INBOX", headers, 10)
+	if err != nil || len(headers.Hidden) != 0 {
+		t.Fatalf("deleted hidden mail remains: %v, %v", headers.Hidden, err)
 	}
 }
 
@@ -204,8 +229,8 @@ func TestSyncFolderHeadersFollowsChangedAddressSettings(t *testing.T) {
 
 	account.ExtraAddresses = []string{" Old@Example.com "}
 	headers = scan(headers)
-	if got := headerUIDs(headers); !slices.Equal(got, []uint32{1, 2}) || !slices.Equal(headers.OtherUIDs, []uint32{3}) {
-		t.Fatalf("with the extra address: emails %v, other UIDs %v; want [1 2] and [3]", got, headers.OtherUIDs)
+	if got := headerUIDs(headers); !slices.Equal(got, []uint32{1, 2}) || len(headers.Hidden) != 1 || headers.Hidden[0].UID != 3 {
+		t.Fatalf("with the extra address: emails %v, hidden %v; want shown [1 2] and hidden [3]", got, headers.Hidden)
 	}
 
 	account.AlwaysShowMailFrom = []string{"uni.edu"}
@@ -219,4 +244,63 @@ func TestSyncFolderHeadersFollowsChangedAddressSettings(t *testing.T) {
 	if got := headerUIDs(headers); !slices.Equal(got, []uint32{1, 3}) {
 		t.Fatalf("after removing the extra address: emails %v, want [1 3]", got)
 	}
+}
+
+func TestIMAPHeadersPreserveDeliveryAndCcRecipients(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	c := memIMAP(t)
+	account := &config.Account{
+		ID: "a", FetchEmail: "me@example.com", ExtraAddresses: []string{"course@example.com"},
+	}
+	for _, cc := range []string{"", "Cc: me@example.com\r\n"} {
+		raw := "From: sender@example.com\r\nTo: unrelated@example.net\r\n" + cc +
+			"X-Original-To: original@example.com\r\n" +
+			"X-Forwarded-To: forwarded@example.com\r\n" +
+			"Delivered-To: \"Course, Teacher\" <course@example.com>\r\n" +
+			"Delivered-To: second@example.com\r\nSubject: delivery\r\n\r\nbody\r\n"
+		cmd := c.Append("INBOX", int64(len(raw)), nil)
+		if _, err := cmd.Write([]byte(raw)); err != nil {
+			t.Fatal(err)
+		}
+		if err := cmd.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := cmd.Wait(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wantDelivery := []string{"course@example.com", "second@example.com", "forwarded@example.com", "original@example.com"}
+	check := func(emails []Email) {
+		t.Helper()
+		if len(emails) != 2 {
+			t.Fatalf("got %d emails, want both delivery-addressed messages", len(emails))
+		}
+		for _, email := range emails {
+			wantTo := []string{"unrelated@example.net"}
+			if email.UID == 2 {
+				wantTo = append(wantTo, "me@example.com")
+			}
+			if !slices.Equal(email.To, wantTo) || !slices.Equal(email.DeliveryRecipients, wantDelivery) {
+				t.Fatalf("UID %d lost recipients: To=%v, delivery=%v", email.UID, email.To, email.DeliveryRecipients)
+			}
+		}
+	}
+	headers, _, err := scanFolderHeaders(c, account, "INBOX", FolderHeaders{}, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(headers.Emails)
+	section := buildDeliveryHeaderSection()
+	msgs, err := c.Fetch(imap.UIDSetNum(1, 2), &imap.FetchOptions{
+		Envelope: true, UID: true, BodySection: []*imap.FetchItemBodySection{section},
+	}).Collect()
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(filterAndBuildBatchEmails(msgs, newAccountAddresses(account), false, section))
+	found, err := searchWithClient(c, account, "INBOX", backend.SearchQuery{Subject: "delivery"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(found)
 }

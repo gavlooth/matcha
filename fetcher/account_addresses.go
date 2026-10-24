@@ -3,6 +3,7 @@ package fetcher
 import (
 	"bufio"
 	"bytes"
+	"log"
 	"net/textproto"
 	"slices"
 	"strings"
@@ -15,15 +16,16 @@ import (
 var deliveryHeaderNames = []string{"Delivered-To", "X-Forwarded-To", "X-Original-To"}
 
 // accountAddresses decides which messages of a mailbox belong to one account:
-// mail sent to one of its own addresses, and mail from senders the user
-// always wants to see there.
+// mail sent to one of its addresses, unaddressed mail the user opts to show,
+// mail matched by a visibility rule, and mail from senders the user always
+// wants to see there.
 type accountAddresses struct {
-	account *config.Account
-	// own holds the fetch address and the extra addresses, lowercased.
-	own []string
-	// alwaysShowFrom holds sender addresses and domains, lowercased, without
-	// a leading "@".
-	alwaysShowFrom []string
+	account          *config.Account
+	own              []string
+	other            []string
+	alwaysShowFrom   []string
+	showRules        []config.MailRule
+	showRuleSettings []string
 }
 
 func newAccountAddresses(account *config.Account) accountAddresses {
@@ -37,13 +39,42 @@ func newAccountAddresses(account *config.Account) accountAddresses {
 			addresses.own = append(addresses.own, address)
 		}
 	}
+	if account.ShowUnaddressedMail {
+		for _, address := range account.OtherAccountAddresses {
+			if address = bareAddress(address); address != "" && !slices.Contains(addresses.other, address) {
+				addresses.other = append(addresses.other, address)
+			}
+		}
+	}
 	for _, sender := range account.AlwaysShowMailFrom {
 		sender = strings.TrimPrefix(bareAddress(sender), "@")
 		if sender != "" && !slices.Contains(addresses.alwaysShowFrom, sender) {
 			addresses.alwaysShowFrom = append(addresses.alwaysShowFrom, sender)
 		}
 	}
+	rules, err := config.LoadMailRules()
+	if err != nil {
+		log.Printf("cannot load show-in-account rules: %v", err)
+	} else {
+		for _, rule := range rules {
+			if !rule.Enabled || !rule.ShowInAccount || rule.AccountID != "" && rule.AccountID != account.ID {
+				continue
+			}
+			addresses.showRules = append(addresses.showRules, rule)
+			addresses.showRuleSettings = append(addresses.showRuleSettings, showRuleDescription(rule))
+		}
+		slices.Sort(addresses.showRuleSettings)
+	}
 	return addresses
+}
+
+func showRuleDescription(rule config.MailRule) string {
+	return strings.Join([]string{
+		strings.TrimSpace(rule.ID),
+		strings.ToLower(strings.TrimSpace(rule.From)),
+		strings.ToLower(strings.TrimSpace(rule.To)),
+		strings.ToLower(strings.TrimSpace(rule.Subject)),
+	}, "|")
 }
 
 // AddressSettings describes the account settings that decide which messages
@@ -59,6 +90,13 @@ func AddressSettings(account *config.Account) string {
 	settings := "own=" + strings.Join(own, ",") + ";always-show-from=" + strings.Join(showFrom, ",")
 	if isGmailAccount(account) {
 		settings += ";gmail"
+	}
+	if account.ShowUnaddressedMail {
+		other := slices.Sorted(slices.Values(addresses.other))
+		settings += ";show-unaddressed=true;other=" + strings.Join(other, ",")
+	}
+	if len(addresses.showRuleSettings) > 0 {
+		settings += ";show-rules=" + strings.Join(addresses.showRuleSettings, ";")
 	}
 	return settings
 }
@@ -129,6 +167,67 @@ func (a accountAddresses) alwaysShowsMailFrom(sender string) bool {
 				return true
 			}
 		} else if domain == entry || strings.HasSuffix(domain, "."+entry) {
+			return true
+		}
+	}
+	return false
+}
+func (a accountAddresses) isOtherAccount(candidate string) bool {
+	candidate = bareAddress(candidate)
+	for _, other := range a.other {
+		if addressMatches(candidate, other, a.account) {
+			return true
+		}
+	}
+	return false
+}
+
+func (a accountAddresses) namesNoConfiguredAddress(recipients []string, headers []byte) bool {
+	for _, recipient := range recipients {
+		if a.isOtherAccount(recipient) {
+			return false
+		}
+	}
+	return !a.namedInOtherDeliveryHeaders(headers)
+}
+
+func (a accountAddresses) namedInOtherDeliveryHeaders(data []byte) bool {
+	if len(data) == 0 {
+		return false
+	}
+	reader := textproto.NewReader(bufio.NewReader(bytes.NewReader(data)))
+	headers, err := reader.ReadMIMEHeader()
+	if err != nil && len(headers) == 0 {
+		return false
+	}
+	for _, name := range deliveryHeaderNames {
+		for _, value := range headers.Values(name) {
+			for _, address := range strings.Split(value, ",") {
+				if a.isOtherAccount(address) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// IsOwnAddress reports whether address belongs to the account, including its
+// configured extra addresses.
+func IsOwnAddress(account *config.Account, address string) bool {
+	if account == nil {
+		return false
+	}
+	candidate := bareAddress(address)
+	fetchAddress := account.FetchEmail
+	if strings.TrimSpace(fetchAddress) == "" {
+		fetchAddress = account.Email
+	}
+	if addressMatches(candidate, bareAddress(fetchAddress), account) {
+		return true
+	}
+	for _, extraAddress := range account.ExtraAddresses {
+		if addressMatches(candidate, bareAddress(extraAddress), account) {
 			return true
 		}
 	}

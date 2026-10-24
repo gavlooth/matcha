@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net/mail"
+	"reflect"
 	"strings"
 	"time"
 
@@ -343,11 +344,14 @@ type Inbox struct {
 	failedAccounts       map[string]string
 	pluginKeyBindings    []PluginKeyBinding
 	searchOverlay        *SearchOverlay
-	localSearcher        LocalSearcher // header copy on this computer; nil when none
-	searchHistory        SearchHistory // recent searches saved on this computer; nil when not saved
+	localSearcher        LocalSearcher
+	hiddenSearcher       HiddenSearcher
+	searchHistory        SearchHistory
 	searchActive         bool
 	searchQuery          string
 	searchResults        []fetcher.Email
+	hiddenView           bool
+	hiddenStatus         string
 	unreadOnly           bool
 	nextUnreadAccount    int
 	threaded             map[string]bool
@@ -553,7 +557,7 @@ func (m *Inbox) displayEmails() []fetcher.Email {
 	default:
 		emails = m.emailsByAccount[m.currentAccountID]
 	}
-	if !m.unreadOnly {
+	if !m.unreadOnly || m.hiddenView {
 		return emails
 	}
 	unread := make([]fetcher.Email, 0, len(emails))
@@ -810,6 +814,9 @@ func (m *Inbox) getTitle() string {
 			}
 		}
 	}
+	if count := m.hiddenCount(); count > 0 {
+		title += fmt.Sprintf(" (%d hidden)", count)
+	}
 	if m.isRefreshing {
 		title += " (refreshing...)"
 	}
@@ -1034,6 +1041,21 @@ func (m *Inbox) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 		kb := config.Keybinds
 		searchBinding := searchKey()
 		switch keypress := msg.String(); keypress {
+		case "H":
+			if m.hiddenSearcher == nil {
+				return m, nil
+			}
+			m.searchOverlay = nil
+			m.searchActive = true
+			m.searchQuery = "Hidden Mail"
+			m.hiddenView = true
+			m.refreshHiddenResults()
+			m.visualMode = false
+			m.selectedUIDs = make(map[uint32]string)
+			m.selectionOrder = []uint32{}
+			m.updateList()
+			opened := SearchOpenedMsg{FolderName: m.headerFolderName(), AccountID: m.currentAccountID}
+			return m, func() tea.Msg { return opened }
 		case searchBinding:
 			m.searchOverlay = NewSearchOverlay(m.width, m.height)
 			cmds := []tea.Cmd{m.searchOverlay.Init()}
@@ -1083,6 +1105,8 @@ func (m *Inbox) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 				m.searchActive = false
 				m.searchQuery = ""
 				m.searchResults = nil
+				m.hiddenView = false
+				m.hiddenStatus = ""
 				m.updateList()
 				return m, nil
 			}
@@ -1216,6 +1240,13 @@ func (m *Inbox) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 		if m.searchOverlay != nil {
 			m.searchOverlay.RefreshLocal()
 		}
+		if m.hiddenView && m.refreshHiddenResults() {
+			m.visualMode = false
+			m.selectedUIDs = make(map[uint32]string)
+			m.selectionOrder = nil
+			m.updateList()
+		}
+		m.list.Title = m.getTitle()
 		return m, nil
 
 	case SearchResultsMsg:
@@ -1228,6 +1259,8 @@ func (m *Inbox) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 		m.searchOverlay = nil
 		m.searchActive = true
 		m.searchQuery = msg.Query.Raw
+		m.hiddenView = false
+		m.hiddenStatus = ""
 		m.searchResults = dedupeEmailsForAccounts(msg.Emails, m.accounts)
 		m.visualMode = false
 		m.selectedUIDs = make(map[uint32]string)
@@ -1426,6 +1459,9 @@ func (m *Inbox) resizeList() {
 	if m.isThreaded() {
 		available -= lipgloss.Height(m.threadedStatusBar())
 	}
+	if m.hiddenStatus != "" {
+		available -= strings.Count(m.hiddenStatus, "\n") + 1
+	}
 	if m.searchOverlay != nil {
 		available -= 1 + lipgloss.Height(m.searchOverlay.View())
 	}
@@ -1467,6 +1503,13 @@ func (m *Inbox) switchToTab(index int) tea.Cmd {
 	m.visualMode = false
 	m.selectedUIDs = make(map[uint32]string)
 	m.selectionOrder = []uint32{}
+	if m.hiddenView {
+		m.searchActive = false
+		m.searchQuery = ""
+		m.searchResults = nil
+		m.hiddenView = false
+		m.hiddenStatus = ""
+	}
 	m.updateList()
 	return m.continueUnreadFetch()
 }
@@ -1554,6 +1597,10 @@ func (m *Inbox) viewAboveSearchOverlay() string {
 		b.WriteString("\n")
 	}
 	b.WriteString(m.list.View())
+	if m.hiddenStatus != "" {
+		b.WriteString("\n")
+		b.WriteString(m.hiddenStatus)
+	}
 	// When threaded, the built-in status bar is hidden because it counts
 	// list items (threads) instead of actual emails. Render our own.
 	if m.isThreaded() {
@@ -1677,6 +1724,45 @@ func (m *Inbox) IsSearchActive() bool {
 // SetLocalSearcher gives the search box the header copy on this computer.
 func (m *Inbox) SetLocalSearcher(local LocalSearcher) {
 	m.localSearcher = local
+}
+
+// SetHiddenSearcher gives the inbox hidden headers from the local copy.
+func (m *Inbox) SetHiddenSearcher(searcher HiddenSearcher) {
+	m.hiddenSearcher = searcher
+	m.list.Title = m.getTitle()
+}
+
+// refreshHiddenResults reads the current folder and tab without disturbing list
+// selection when an index update leaves the displayed mail unchanged.
+func (m *Inbox) refreshHiddenResults() bool {
+	emails := dedupeEmailsForAccounts(m.hiddenSearcher.Hidden(m.headerFolderName(), m.searchAccountIDs()), m.accounts)
+	mailLabel := "mails"
+	if len(emails) == 1 {
+		mailLabel = "mail"
+	}
+	m.hiddenStatus = fmt.Sprintf("%d hidden %s: they name none of this account's addresses\nAdd extra addresses, always show mail from, or a show-in-account rule to show such mail.", len(emails), mailLabel)
+	if reflect.DeepEqual(m.searchResults, emails) {
+		return false
+	}
+	m.searchResults = emails
+	return true
+}
+
+func (m *Inbox) hiddenCount() int {
+	if m.hiddenSearcher == nil {
+		return 0
+	}
+	return m.hiddenSearcher.HiddenCount(m.headerFolderName(), m.searchAccountIDs())
+}
+
+func (m *Inbox) headerFolderName() string {
+	if m.folderName != "" {
+		return m.folderName
+	}
+	if m.mailbox == MailboxInbox {
+		return "INBOX"
+	}
+	return string(m.mailbox)
 }
 
 // SetSearchHistory gives the search box the saved recent searches.
@@ -1885,6 +1971,13 @@ func (m *Inbox) SetSize(width, height int) {
 
 // SetFolderName sets a custom folder name for the inbox title.
 func (m *Inbox) SetFolderName(name string) {
+	if name != m.folderName && m.hiddenView {
+		m.searchActive = false
+		m.searchQuery = ""
+		m.searchResults = nil
+		m.hiddenView = false
+		m.hiddenStatus = ""
+	}
 	m.folderName = name
 	m.updateList()
 }

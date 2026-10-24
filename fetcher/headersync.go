@@ -19,16 +19,13 @@ var ErrHeaderSyncNotSupported = errors.New("local header index needs an IMAP acc
 // caller must scan again.
 var ErrFolderNeedsNewScan = errors.New("folder UIDs or the account's address settings changed since the last scan")
 
-// FolderHeaders is what the local search index knows about one folder of one
-// account. OtherUIDs are messages in the folder that the account does not show
-// (see messageMatchesAccount); they are remembered so they are not fetched
-// again. AddressSettings is AddressSettings(account) when the folder was
-// scanned; a scan with other settings starts the folder over.
+// FolderHeaders is the local copy of shown and hidden message headers in one
+// account folder.
 type FolderHeaders struct {
 	UIDValidity     uint32
 	AddressSettings string
 	Emails          []Email
-	OtherUIDs       []uint32
+	Hidden          []Email
 }
 
 func headerSyncSupported(account *config.Account) bool {
@@ -119,7 +116,7 @@ func scanFolderHeaders(c *imapclient.Client, account *config.Account, folder str
 		readByUID[uint32(msg.UID)] = hasSeenFlag(msg.Flags)
 	}
 
-	seen := make(map[uint32]bool, len(known.Emails)+len(known.OtherUIDs))
+	seen := make(map[uint32]bool, len(known.Emails)+len(known.Hidden))
 	for _, email := range known.Emails {
 		if read, ok := readByUID[email.UID]; ok {
 			email.IsRead = read
@@ -127,10 +124,11 @@ func scanFolderHeaders(c *imapclient.Client, account *config.Account, folder str
 			seen[email.UID] = true
 		}
 	}
-	for _, uid := range known.OtherUIDs {
-		if _, ok := readByUID[uid]; ok {
-			updated.OtherUIDs = append(updated.OtherUIDs, uid)
-			seen[uid] = true
+	for _, email := range known.Hidden {
+		if read, ok := readByUID[email.UID]; ok {
+			email.IsRead = read
+			updated.Hidden = append(updated.Hidden, email)
+			seen[email.UID] = true
 		}
 	}
 
@@ -156,8 +154,8 @@ func splitBatch(uids []uint32, n int) (now, later []uint32) {
 	return uids[:n], uids[n:]
 }
 
-// fetchHeaders adds the headers of uids to headers. UIDs the account does not
-// show, or gone from the server meanwhile, go to OtherUIDs.
+// fetchHeaders adds headers for fetched messages, separating shown mail from
+// hidden mail. UIDs not returned by the server are not retained.
 func fetchHeaders(c *imapclient.Client, account *config.Account, folder string, headers FolderHeaders, uids []uint32) (FolderHeaders, error) {
 	if len(uids) == 0 {
 		return headers, nil
@@ -180,20 +178,44 @@ func fetchHeaders(c *imapclient.Client, account *config.Account, folder string, 
 	if err != nil {
 		sentMailbox = getSentMailbox(account)
 	}
-	emails := filterAndBuildBatchEmails(msgs, newAccountAddresses(account), folder == sentMailbox, deliveryHeaderSection)
-	kept := make(map[uint32]bool, len(emails))
-	for _, email := range emails {
-		kept[email.UID] = true
-	}
+	addresses := newAccountAddresses(account)
 	updated := FolderHeaders{
 		UIDValidity:     headers.UIDValidity,
 		AddressSettings: headers.AddressSettings,
-		Emails:          append(slices.Clip(headers.Emails), emails...),
-		OtherUIDs:       slices.Clip(headers.OtherUIDs),
+		Emails:          slices.Clip(headers.Emails),
+		Hidden:          slices.Clip(headers.Hidden),
 	}
-	for _, uid := range uids {
-		if !kept[uid] {
-			updated.OtherUIDs = append(updated.OtherUIDs, uid)
+	for _, msg := range msgs {
+		if msg.Envelope == nil {
+			continue
+		}
+		var from string
+		if len(msg.Envelope.From) > 0 {
+			from = formatAddress(msg.Envelope.From[0])
+		}
+		to := make([]string, 0, len(msg.Envelope.To)+len(msg.Envelope.Cc))
+		for _, address := range msg.Envelope.To {
+			to = append(to, address.Addr())
+		}
+		for _, address := range msg.Envelope.Cc {
+			to = append(to, address.Addr())
+		}
+		replyTo := make([]string, 0, len(msg.Envelope.ReplyTo))
+		for _, address := range msg.Envelope.ReplyTo {
+			replyTo = append(replyTo, address.Addr())
+		}
+		headerData := msg.FindBodySection(deliveryHeaderSection)
+		email := Email{
+			UID: uint32(msg.UID), From: from, To: to, ReplyTo: replyTo, Subject: decodeHeader(msg.Envelope.Subject),
+			Date: msg.Envelope.Date, IsRead: hasSeenFlag(msg.Flags), MessageID: msg.Envelope.MessageID,
+			InReplyTo:  firstEnvelopeInReplyTo(msg.Envelope.InReplyTo),
+			References: headerMessageIDs(headerData, "References"), AccountID: account.ID,
+			DeliveryRecipients: deliveryRecipients(headerData),
+		}
+		if messageMatchesAccount(msg, to, addresses, folder == sentMailbox, deliveryHeaderSection) {
+			updated.Emails = append(updated.Emails, email)
+		} else {
+			updated.Hidden = append(updated.Hidden, email)
 		}
 	}
 	return updated, nil

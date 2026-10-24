@@ -11,6 +11,9 @@ import (
 )
 
 func (m *Settings) updateAccounts(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.suggestionsOpen {
+		return m.updateSuggestedAddresses(msg)
+	}
 	if m.isCryptoConfig {
 		var m2 *Settings
 		var cmd tea.Cmd
@@ -42,6 +45,12 @@ func (m *Settings) updateAccounts(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case keyDown, "j":
 		itemCount := len(m.cfg.Accounts) + 1
 		m.accountsCursor = (m.accountsCursor + 1) % itemCount
+	case "a":
+		if m.accountsCursor < len(m.cfg.Accounts) {
+			m.openAddressSuggestions(m.accountsCursor)
+			opened := SearchOpenedMsg{FolderName: "INBOX", AccountID: m.cfg.Accounts[m.accountsCursor].ID}
+			return m, func() tea.Msg { return opened }
+		}
 	case "d":
 		if m.accountsCursor < len(m.cfg.Accounts) && len(m.cfg.Accounts) > 0 {
 			m.confirmingDelete = true
@@ -51,26 +60,28 @@ func (m *Settings) updateAccounts(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			acc := m.cfg.Accounts[m.accountsCursor]
 			return m, func() tea.Msg {
 				return GoToEditAccountMsg{
-					AccountID:          acc.ID,
-					Provider:           acc.ServiceProvider,
-					Name:               acc.Name,
-					Email:              acc.Email,
-					FetchEmail:         acc.FetchEmail,
-					SendAsEmail:        acc.SendAsEmail,
-					CatchAll:           acc.CatchAll,
-					ExtraAddresses:     acc.ExtraAddresses,
-					AlwaysShowMailFrom: acc.AlwaysShowMailFrom,
-					AuthMethod:         acc.AuthMethod,
-					IMAPServer:         acc.IMAPServer,
-					IMAPPort:           acc.IMAPPort,
-					SMTPServer:         acc.SMTPServer,
-					SMTPPort:           acc.SMTPPort,
-					Insecure:           acc.Insecure,
-					Protocol:           acc.Protocol,
-					JMAPEndpoint:       acc.JMAPEndpoint,
-					POP3Server:         acc.POP3Server,
-					POP3Port:           acc.POP3Port,
-					MaildirPath:        acc.MaildirPath,
+					AccountID:              acc.ID,
+					Provider:               acc.ServiceProvider,
+					Name:                   acc.Name,
+					Email:                  acc.Email,
+					FetchEmail:             acc.FetchEmail,
+					SendAsEmail:            acc.SendAsEmail,
+					CatchAll:               acc.CatchAll,
+					ExtraAddresses:         acc.ExtraAddresses,
+					AlwaysShowMailFrom:     acc.AlwaysShowMailFrom,
+					ShowUnaddressedMail:    acc.ShowUnaddressedMail,
+					DiscoverExtraAddresses: acc.DiscoverExtraAddresses,
+					AuthMethod:             acc.AuthMethod,
+					IMAPServer:             acc.IMAPServer,
+					IMAPPort:               acc.IMAPPort,
+					SMTPServer:             acc.SMTPServer,
+					SMTPPort:               acc.SMTPPort,
+					Insecure:               acc.Insecure,
+					Protocol:               acc.Protocol,
+					JMAPEndpoint:           acc.JMAPEndpoint,
+					POP3Server:             acc.POP3Server,
+					POP3Port:               acc.POP3Port,
+					MaildirPath:            acc.MaildirPath,
 				}
 			}
 		}
@@ -124,10 +135,12 @@ func (m *Settings) enterCryptoConfig() {
 }
 
 func (m *Settings) viewAccounts() string {
+	if m.suggestionsOpen {
+		return m.viewAddressSuggestions()
+	}
 	if m.isCryptoConfig {
 		return m.viewSMIMEConfig()
 	}
-
 	var b strings.Builder
 	b.WriteString(titleStyle.Render(t("settings_accounts.title")) + "\n\n")
 
@@ -164,6 +177,12 @@ func (m *Settings) viewAccounts() string {
 		if n := len(account.AlwaysShowMailFrom); n > 0 {
 			providerInfo += fmt.Sprintf(" [always shows %d senders]", n)
 		}
+		if account.ShowUnaddressedMail {
+			providerInfo += " [unaddressed mail]"
+		}
+		if account.DiscoverExtraAddresses {
+			providerInfo += " [discovers addresses]"
+		}
 
 		line := fmt.Sprintf("%s - %s", displayName, accountEmailStyle.Render(providerInfo))
 
@@ -197,4 +216,105 @@ func (m *Settings) viewAccounts() string {
 	}
 
 	return b.String()
+}
+
+func (m *Settings) openAddressSuggestions(accountIndex int) {
+	m.suggestionsOpen = true
+	m.suggestionsAccount = accountIndex
+	m.suggestionsCursor = 0
+	m.suggestedAddresses = nil
+	account := &m.cfg.Accounts[accountIndex]
+	if updater, ok := m.hiddenSearcher.(interface{ SetAccount(*config.Account) }); ok {
+		updater.SetAccount(account)
+	}
+	if m.hiddenSearcher == nil {
+		return
+	}
+	for _, suggestion := range m.hiddenSearcher.HiddenRecipients(account.ID, "INBOX") {
+		if configuredAddress(account.GetFetchEmail(), suggestion.Address) ||
+			configuredAddress(account.Email, suggestion.Address) ||
+			addressInList(account.ExtraAddresses, suggestion.Address) ||
+			addressInList(account.IgnoredAddresses, suggestion.Address) ||
+			addressInList(account.OtherAccountAddresses, suggestion.Address) {
+			continue
+		}
+		m.suggestedAddresses = append(m.suggestedAddresses, suggestion)
+		if len(m.suggestedAddresses) == 15 {
+			break
+		}
+	}
+}
+
+func (m *Settings) updateSuggestedAddresses(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.suggestionsOpen = false
+		return m, nil
+	case "up", "k":
+		if len(m.suggestedAddresses) > 0 {
+			m.suggestionsCursor = (m.suggestionsCursor - 1 + len(m.suggestedAddresses)) % len(m.suggestedAddresses)
+		}
+	case keyDown, "j":
+		if len(m.suggestedAddresses) > 0 {
+			m.suggestionsCursor = (m.suggestionsCursor + 1) % len(m.suggestedAddresses)
+		}
+	case keyEnter:
+		return m.saveSuggestedAddress(false)
+	case "x":
+		return m.saveSuggestedAddress(true)
+	}
+	return m, nil
+}
+
+func (m *Settings) saveSuggestedAddress(ignore bool) (tea.Model, tea.Cmd) {
+	if len(m.suggestedAddresses) == 0 || m.suggestionsAccount >= len(m.cfg.Accounts) {
+		return m, nil
+	}
+	account := &m.cfg.Accounts[m.suggestionsAccount]
+	address := m.suggestedAddresses[m.suggestionsCursor].Address
+	if ignore {
+		account.IgnoredAddresses = append(account.IgnoredAddresses, address)
+	} else {
+		account.ExtraAddresses = append(account.ExtraAddresses, address)
+	}
+	if err := config.SaveConfig(m.cfg); err != nil {
+		if ignore {
+			account.IgnoredAddresses = account.IgnoredAddresses[:len(account.IgnoredAddresses)-1]
+		} else {
+			account.ExtraAddresses = account.ExtraAddresses[:len(account.ExtraAddresses)-1]
+		}
+		return m, func() tea.Msg { return NotifyMsg{Message: err.Error()} }
+	}
+	m.openAddressSuggestions(m.suggestionsAccount)
+	return m, func() tea.Msg { return ConfigSavedMsg{} }
+}
+
+func (m *Settings) viewAddressSuggestions() string {
+	var b strings.Builder
+	b.WriteString(titleStyle.Render("Suggested addresses") + "\n\n")
+	b.WriteString("Only add addresses that belong to you; these are unverified recipients.\nUse Always Show Mail From for a teacher or mailing list instead.\n\n")
+	if len(m.suggestedAddresses) == 0 {
+		b.WriteString(accountEmailStyle.Render("  No suggestions. The INBOX header copy may not be ready, or there may be no eligible recipients.") + "\n\n")
+	} else {
+		for i, suggestion := range m.suggestedAddresses {
+			line := fmt.Sprintf("%s - %d hidden mails", suggestion.Address, suggestion.Count)
+			b.WriteString(m.contentItemStyle(i == m.suggestionsCursor).Render(m.contentCursor(i == m.suggestionsCursor)+line) + "\n")
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString(helpStyle.Render("↑/↓: navigate • enter: add address • x: ignore • esc: accounts"))
+	return b.String()
+}
+
+func configuredAddress(configured, candidate string) bool {
+	return strings.EqualFold(strings.TrimSpace(configured), strings.TrimSpace(candidate))
+}
+
+func addressInList(addresses []string, candidate string) bool {
+	for _, address := range addresses {
+		if configuredAddress(address, candidate) {
+			return true
+		}
+	}
+	return false
 }

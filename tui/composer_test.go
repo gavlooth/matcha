@@ -605,3 +605,43 @@ func TestComposerDynamicHeight(t *testing.T) {
 		t.Errorf("signatureInput height should be at least 2, got %d", composer.signatureInput.Height())
 	}
 }
+
+func TestComposerAliasFromOverridePersistsAndClearsOnAccountSwitch(t *testing.T) {
+	accounts := []config.Account{
+		{ID: "one", FetchEmail: "main@example.com", Name: "User", ExtraAddresses: []string{"alias@example.com"}},
+		{ID: "two", FetchEmail: "other@example.com"},
+	}
+	composer := NewComposerWithAccounts(accounts, "one", "sender@example.net", "Re: subject", "", false)
+	composer.SetFromOverride("User <alias@example.com>")
+	if got := composer.ToDraft().FromOverride; got != "User <alias@example.com>" {
+		t.Fatalf("draft From override = %q", got)
+	}
+	restored := NewComposerFromDraft(composer.ToDraft(), accounts, false)
+	if !restored.fromOverrideSet || restored.fromInput.Value() != "User <alias@example.com>" || !strings.Contains(fmt.Sprint(restored.View()), "alias@example.com") {
+		t.Fatalf("restored From override = %q, set=%v", restored.fromInput.Value(), restored.fromOverrideSet)
+	}
+	restored.showAccountPicker = true
+	next, _ := restored.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	restored = next.(*Composer)
+	restored.showAccountPicker = false
+	if restored.fromOverrideSet || restored.fromInput.Value() != accounts[1].FormatFromHeader() {
+		t.Fatalf("account switch retained alias From %q", restored.fromInput.Value())
+	}
+
+	restored.SetSelectedAccount("one")
+	restored.SetFromOverride("User <alias@example.com>")
+	restored.toInput.SetValue("recipient@example.net")
+	restored.focusIndex = focusSend
+	model, cmd := restored.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("send command is nil")
+	}
+	msg, ok := cmd().(SendEmailMsg)
+	if !ok {
+		t.Fatalf("send command returned %T", cmd())
+	}
+	if msg.FromOverride != "User <alias@example.com>" {
+		t.Fatalf("sent From override = %q", msg.FromOverride)
+	}
+	_ = model
+}

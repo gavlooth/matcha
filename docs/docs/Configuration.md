@@ -63,12 +63,16 @@ Configuration is stored in `~/.config/matcha/config.json`.
 
 `send_as_email` is optional. When set, Matcha uses it for the outgoing `From` header while continuing to authenticate with the account's login address.
 
-Matcha shows a message in an account only when it is for that account. In Sent, one of the account's addresses must be the sender. In other folders, one of its addresses must be in `To`, `Cc` or a `Delivered-To`/`X-Original-To`/`X-Forwarded-To` header, unless `catch_all` is `true`. All Mail accepts both. This keeps several accounts that share one mailbox apart, but it also hides mail for the account's other addresses and mail that lists the account only in `Bcc`. Two optional settings fix that. Both can be edited in Settings → Accounts → `e`.
+Matcha shows mail in an account when its addresses appear in `To`, `Cc` or a `Delivered-To`/`X-Original-To`/`X-Forwarded-To` header. In Sent, one of the account's addresses must be the sender. `catch_all` shows every message; otherwise accounts stay separate when they share a mailbox. Settings → Accounts → `e` includes these address and visibility settings:
 
+- `show_unaddressed_mail` shows mail only when its To, Cc and delivery headers name none of this account's addresses or any other configured account's addresses. This can reveal Bcc mail such as a teacher's course announcements. Mail naming another configured account stays hidden here. Sent is unaffected.
+- `always_show_mail_from` lists senders whose mail is shown even when it names none of the account's addresses. Use an address or a domain; a domain also covers its subdomains.
 - `extra_addresses` lists more addresses that deliver to the account, such as aliases or old addresses. Mail sent to them, or sent from them in Sent, is shown like mail for `fetch_email`. Reply-all also leaves them out of the recipients.
-- `always_show_mail_from` lists senders whose mail is shown even when it names none of the account's addresses. Use it for people or organisations that send to you in `Bcc`, such as a teacher writing to a whole class. An entry is either an address or a domain. A domain also covers its subdomains, so `university.edu` covers `cs.university.edu`.
+- `discover_extra_addresses` adds addresses found in Sent and hidden-mail headers to `extra_addresses` automatically. Addresses in `ignored_addresses` are not added or suggested again; removing an address from Extra addresses adds it to this list, and adding it back removes it.
 
-Changing either setting, `fetch_email` or `catch_all` makes Matcha fetch the headers on this computer again. Mail hidden before then shows in search, and mail that no longer matches drops out.
+Automatic discovery is off by default and supports IMAP accounts. After the INBOX header copy finishes, it scans Sent once per account per application run. It requires at least three Sent messages from an address and at least three hidden INBOX messages addressed to it, excluding configured, ignored and other-account addresses. Matcha reports each addition with both counts and refreshes the inbox. This is a heuristic, not proof of ownership: shared or imported Sent folders can produce false matches. Leave it off and use Suggested addresses for manual review when that risk matters.
+
+Changing visibility settings, `fetch_email` or `catch_all` refreshes the inbox and fetches the headers on this computer again. Mail that now matches appears in normal results, and mail that no longer matches drops out.
 
 `smtp_username` is optional. When set, Matcha uses it instead of `email` when authenticating with the SMTP server. Set this when your mail provider uses different credentials for IMAP and SMTP — for example, a full email address for IMAP but a short username for SMTP. The corresponding SMTP password is stored separately in the OS keyring under the key `<email>:smtp-password`; if no SMTP-specific password is stored, the main account password is used as a fallback.
 

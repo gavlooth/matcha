@@ -87,7 +87,9 @@ type Model struct {
 	service     daemonclient.Service
 
 	// headerIndex is the header copy the search box matches while typing.
-	headerIndex *headerindex.Index
+	headerIndex               *headerindex.Index
+	discoveredAddressAccounts map[string]bool
+	addressSettings           map[string]string
 
 	pendingPrompt *plugin.PendingPrompt
 	mailtoURL     *url.URL
@@ -120,29 +122,91 @@ type Model struct {
 	mailRuleLastError string
 }
 
+func replyFromOverride(cfg *config.Config, email fetcher.Email) string {
+	if cfg == nil {
+		return ""
+	}
+	accountID := email.AccountID
+	if accountID == "" && len(cfg.Accounts) > 0 {
+		accountID = cfg.GetFirstAccount().ID
+	}
+	var account *config.Account
+	for i := range cfg.Accounts {
+		if cfg.Accounts[i].ID == accountID {
+			account = &cfg.Accounts[i]
+			break
+		}
+	}
+	if account == nil {
+		return ""
+	}
+	bare := func(value string) string {
+		if address, err := mail.ParseAddress(value); err == nil {
+			value = address.Address
+		}
+		return strings.ToLower(strings.TrimSpace(value))
+	}
+	fetchAddress := bare(account.GetFetchEmail())
+	recipients := [2][]string{email.To, email.DeliveryRecipients}
+	for _, source := range recipients {
+		for _, recipient := range source {
+			if bare(recipient) == fetchAddress {
+				return ""
+			}
+		}
+	}
+	formatFrom := func(address string) string {
+		if account.Name != "" {
+			return fmt.Sprintf("%s <%s>", account.Name, address)
+		}
+		return address
+	}
+	for _, source := range recipients {
+		for _, recipient := range source {
+			address := bare(recipient)
+			for _, extra := range account.ExtraAddresses {
+				if address == bare(extra) {
+					return formatFrom(address)
+				}
+			}
+		}
+	}
+	if account.CatchAll {
+		if len(email.DeliveryRecipients) > 0 {
+			return formatFrom(bare(email.DeliveryRecipients[0]))
+		}
+		if len(email.To) > 0 {
+			return formatFrom(bare(email.To[0]))
+		}
+	}
+	return ""
+}
+
 // NewModel creates the initial TUI model.
 func NewModel(cfg *config.Config, mailtoURL *url.URL, plugins *plugin.Manager, showLogPanel bool, logCh <-chan logging.Entry, logPanel *tui.LogPanel) *Model {
 	idleUpdates := make(chan fetcher.IdleUpdate, 16)
 	store := emailstore.NewStore()
 	m := &Model{
-		current:       tui.NewChoice(),
-		config:        cfg,
-		plugins:       plugins,
-		store:         store,
-		idleUpdates:   idleUpdates,
-		idleWatcher:   fetcher.NewIdleWatcher(idleUpdates),
-		providers:     make(map[string]backend.Provider),
-		headerIndex:   headerindex.New(),
-		mailtoURL:     mailtoURL,
-		showLogPanel:  showLogPanel,
-		logCh:         logCh,
-		logPanel:      logPanel,
-		palette:       palette.New(),
-		actionManager: emailactions.NewManager(emailactions.Dependencies{Config: cfg}, store, nil),
-		pluginBridge:  pluginbridge.NewManager(plugins, store, cfg, nil),
+		current:                   tui.NewChoice(),
+		config:                    cfg,
+		plugins:                   plugins,
+		store:                     store,
+		idleUpdates:               idleUpdates,
+		idleWatcher:               fetcher.NewIdleWatcher(idleUpdates),
+		providers:                 make(map[string]backend.Provider),
+		headerIndex:               headerindex.New(),
+		discoveredAddressAccounts: make(map[string]bool),
+		mailtoURL:                 mailtoURL,
+		showLogPanel:              showLogPanel,
+		logCh:                     logCh,
+		logPanel:                  logPanel,
+		palette:                   palette.New(),
+		actionManager:             emailactions.NewManager(emailactions.Dependencies{Config: cfg}, store, nil),
+		pluginBridge:              pluginbridge.NewManager(plugins, store, cfg, nil),
 	}
 
 	m.updateCurrentFromConfig(cfg, mailtoURL)
+	m.addressSettings = accountAddressSettings(cfg)
 	m.updateSubordinates()
 	return m
 }
@@ -221,6 +285,7 @@ func (m *Model) newSettings() *tui.Settings {
 	if m.plugins != nil {
 		s.SetPlugins(m.plugins)
 	}
+	s.SetHiddenSearcher(m.headerIndex)
 	return s
 }
 
@@ -847,9 +912,22 @@ func withEditedFields(existing, edited config.Account) config.Account {
 	existing.ServiceProvider = edited.ServiceProvider
 	existing.FetchEmail = edited.FetchEmail
 	existing.SendAsEmail = edited.SendAsEmail
-	existing.CatchAll = edited.CatchAll
-	existing.ExtraAddresses = edited.ExtraAddresses
 	existing.AlwaysShowMailFrom = edited.AlwaysShowMailFrom
+	existing.CatchAll = edited.CatchAll
+	existing.ShowUnaddressedMail = edited.ShowUnaddressedMail
+	existing.DiscoverExtraAddresses = edited.DiscoverExtraAddresses
+	existing.IgnoredAddresses = slices.Clone(existing.IgnoredAddresses)
+	for _, address := range existing.ExtraAddresses {
+		address = strings.ToLower(strings.TrimSpace(address))
+		if !containsAddress(edited.ExtraAddresses, address) && !containsAddress(existing.IgnoredAddresses, address) {
+			existing.IgnoredAddresses = append(existing.IgnoredAddresses, address)
+		}
+	}
+	for _, address := range edited.ExtraAddresses {
+		address = strings.ToLower(strings.TrimSpace(address))
+		existing.IgnoredAddresses = removeAddress(existing.IgnoredAddresses, address)
+	}
+	existing.ExtraAddresses = edited.ExtraAddresses
 	existing.AuthMethod = edited.AuthMethod
 	existing.Protocol = edited.Protocol
 	existing.Insecure = edited.Insecure
@@ -869,24 +947,26 @@ func withEditedFields(existing, edited config.Account) config.Account {
 
 func buildAccount(id string, msg tui.Credentials, fetchEmail string) config.Account {
 	account := config.Account{
-		ID:                 id,
-		Name:               msg.Name,
-		Email:              msg.Host,
-		Password:           msg.Password,
-		ServiceProvider:    msg.Provider,
-		FetchEmail:         fetchEmail,
-		SendAsEmail:        msg.SendAsEmail,
-		CatchAll:           msg.CatchAll,
-		ExtraAddresses:     msg.ExtraAddresses,
-		AlwaysShowMailFrom: msg.AlwaysShowMailFrom,
-		AuthMethod:         msg.AuthMethod,
-		Protocol:           msg.Protocol,
-		Insecure:           msg.Insecure,
-		JMAPEndpoint:       msg.JMAPEndpoint,
-		POP3Server:         msg.POP3Server,
-		POP3Port:           msg.POP3Port,
-		MaildirPath:        msg.MaildirPath,
-		SC:                 &config.SessionCache{},
+		ID:                     id,
+		Name:                   msg.Name,
+		Email:                  msg.Host,
+		Password:               msg.Password,
+		ServiceProvider:        msg.Provider,
+		FetchEmail:             fetchEmail,
+		SendAsEmail:            msg.SendAsEmail,
+		CatchAll:               msg.CatchAll,
+		ShowUnaddressedMail:    msg.ShowUnaddressedMail,
+		DiscoverExtraAddresses: msg.DiscoverExtraAddresses,
+		ExtraAddresses:         msg.ExtraAddresses,
+		AlwaysShowMailFrom:     msg.AlwaysShowMailFrom,
+		AuthMethod:             msg.AuthMethod,
+		Protocol:               msg.Protocol,
+		Insecure:               msg.Insecure,
+		JMAPEndpoint:           msg.JMAPEndpoint,
+		POP3Server:             msg.POP3Server,
+		POP3Port:               msg.POP3Port,
+		MaildirPath:            msg.MaildirPath,
+		SC:                     &config.SessionCache{},
 	}
 	if msg.Provider == "custom" || msg.Protocol == "pop3" {
 		account.IMAPServer = msg.IMAPServer
@@ -1208,6 +1288,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 		m.folderInbox = tui.NewFolderInbox(cachedFolders, m.config.Accounts)
 		m.folderInbox.SetFolderData(cachedFolders, unread, foldersByAccount, unreadByAccount)
 		m.folderInbox.GetInbox().SetLocalSearcher(m.headerIndex)
+		m.folderInbox.GetInbox().SetHiddenSearcher(m.headerIndex)
 		m.folderInbox.GetInbox().SetSearchHistory(config.SearchHistoryFile{})
 		m.setFolderInboxDefaults()
 		m.loadFolderInboxCache(emailstore.FolderInbox)
@@ -1622,6 +1703,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 
 	case headerSyncStepMsg:
 		return m, m.handleHeaderSyncStep(msg)
+	case addressDiscoveryMsg:
+		return m, m.handleAddressDiscoveryResult(msg)
 
 	case tui.SearchRequestedMsg:
 		folderName := msg.FolderName
@@ -1700,7 +1783,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 
 	case tui.ConfigSavedMsg:
 		m.afterConfigSaved()
-		return m, nil
+		return m, m.refreshAddressSettingsCmd()
 
 	case tui.ToggleSplitOrientationMsg:
 		if m.config.EnableSplitPane && m.folderInbox != nil && m.folderInbox.HasSplitPreview() {
@@ -2065,22 +2148,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 				accountID = m.config.GetFirstAccount().ID
 			}
 			composer = tui.NewComposerWithAccounts(m.config.Accounts, accountID, to, subject, "", hideTips)
-			if len(msg.Email.To) > 0 {
-				for i := range m.config.Accounts {
-					if m.config.Accounts[i].ID == accountID && m.config.Accounts[i].CatchAll {
-						acc := &m.config.Accounts[i]
-						deliveryAddr := msg.Email.To[0]
-						if addr, err := mail.ParseAddress(deliveryAddr); err == nil {
-							deliveryAddr = addr.Address
-						}
-						fromVal := deliveryAddr
-						if acc.Name != "" {
-							fromVal = fmt.Sprintf("%s <%s>", acc.Name, deliveryAddr)
-						}
-						composer.SetFromOverride(fromVal)
-						break
-					}
-				}
+			if fromOverride := replyFromOverride(m.config, msg.Email); fromOverride != "" {
+				composer.SetFromOverride(fromOverride)
 			}
 		} else {
 			composer = tui.NewComposer("", to, subject, "", hideTips)
@@ -2186,23 +2255,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 				accountID = m.config.GetFirstAccount().ID
 			}
 			composer = tui.NewComposerWithAccounts(m.config.Accounts, accountID, sender, subject, "", hideTips)
-			// For catch-all accounts, pre-fill From with the specific address the email was delivered to.
-			if len(msg.Email.To) > 0 {
-				for i := range m.config.Accounts {
-					if m.config.Accounts[i].ID == accountID && m.config.Accounts[i].CatchAll {
-						acc := &m.config.Accounts[i]
-						deliveryAddr := msg.Email.To[0]
-						if addr, err := mail.ParseAddress(deliveryAddr); err == nil {
-							deliveryAddr = addr.Address
-						}
-						fromVal := deliveryAddr
-						if acc.Name != "" {
-							fromVal = fmt.Sprintf("%s <%s>", acc.Name, deliveryAddr)
-						}
-						composer.SetFromOverride(fromVal)
-						break
-					}
-				}
+			if fromOverride := replyFromOverride(m.config, msg.Email); fromOverride != "" {
+				composer.SetFromOverride(fromOverride)
 			}
 		} else {
 			composer = tui.NewComposer("", sender, subject, "", hideTips)
@@ -2762,4 +2816,22 @@ func filterUnique(existing, incoming []fetcher.Email) []fetcher.Email {
 		}
 	}
 	return unique
+}
+func containsAddress(addresses []string, candidate string) bool {
+	for _, address := range addresses {
+		if strings.EqualFold(strings.TrimSpace(address), candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+func removeAddress(addresses []string, candidate string) []string {
+	filtered := addresses[:0]
+	for _, address := range addresses {
+		if !strings.EqualFold(strings.TrimSpace(address), candidate) {
+			filtered = append(filtered, address)
+		}
+	}
+	return filtered
 }

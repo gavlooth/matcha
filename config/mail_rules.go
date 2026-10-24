@@ -15,16 +15,17 @@ import (
 // MailRule is a local, ordered INBOX rule. Empty AccountID applies to all accounts.
 // Every nonempty condition must match; the first enabled match wins.
 type MailRule struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	Enabled    bool   `json:"enabled"`
-	AccountID  string `json:"account_id,omitempty"`
-	From       string `json:"from,omitempty"`
-	To         string `json:"to,omitempty"`
-	Subject    string `json:"subject,omitempty"`
-	MoveTo     string `json:"move_to,omitempty"`
-	MarkRead   bool   `json:"mark_read,omitempty"`
-	activation string
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Enabled       bool   `json:"enabled"`
+	AccountID     string `json:"account_id,omitempty"`
+	From          string `json:"from,omitempty"`
+	To            string `json:"to,omitempty"`
+	Subject       string `json:"subject,omitempty"`
+	MoveTo        string `json:"move_to,omitempty"`
+	MarkRead      bool   `json:"mark_read,omitempty"`
+	ShowInAccount bool   `json:"show_in_account,omitempty"`
+	activation    string
 }
 
 // ActivationID identifies a saved rule's activation, including disable/enable
@@ -53,8 +54,8 @@ func ValidateMailRule(rule MailRule) error {
 	if strings.TrimSpace(rule.From) == "" && strings.TrimSpace(rule.To) == "" && strings.TrimSpace(rule.Subject) == "" {
 		return errors.New("at least one From, To or Subject condition is required")
 	}
-	if rule.MoveTo == "" && !rule.MarkRead {
-		return errors.New("at least one move or mark-read action is required")
+	if rule.MoveTo == "" && !rule.MarkRead && !rule.ShowInAccount {
+		return errors.New("at least one move, mark-read or show-in-account action is required")
 	}
 	if rule.MoveTo != "" {
 		if strings.TrimSpace(rule.MoveTo) == "" || strings.ContainsAny(rule.MoveTo, "\x00\r\n") {

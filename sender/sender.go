@@ -124,12 +124,16 @@ func extractBareEmail(addr string) string {
 
 // generateMessageID creates a unique Message-ID header.
 func generateMessageID(from string) string {
-	buf := make([]byte, 16)
-	_, err := rand.Read(buf)
-	if err != nil {
-		return fmt.Sprintf("<%d.%s>", time.Now().UnixNano(), from)
+	address := extractBareEmail(from)
+	domain := "localhost"
+	if at := strings.LastIndexByte(address, '@'); at >= 0 && at < len(address)-1 {
+		domain = address[at+1:]
 	}
-	return fmt.Sprintf("<%x@%s>", buf, from)
+	var buf [16]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return fmt.Sprintf("<%d@%s>", time.Now().UnixNano(), domain)
+	}
+	return fmt.Sprintf("<%x@%s>", buf, domain)
 }
 
 // containsMarkup returns true if the string contains Markdown or HTML elements.

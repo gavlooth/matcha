@@ -69,6 +69,12 @@ func TestValidateMailRules(t *testing.T) {
 	if err := ValidateMailRule(moveOnly); err != nil {
 		t.Fatal(err)
 	}
+
+	showOnly := valid
+	showOnly.MarkRead, showOnly.ShowInAccount = false, true
+	if err := ValidateMailRule(showOnly); err != nil {
+		t.Fatalf("show-only rule should be valid: %v", err)
+	}
 }
 
 func TestMailRulesSaveLoadPreservesUserConfiguration(t *testing.T) {

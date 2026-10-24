@@ -76,10 +76,12 @@ func searchWithClient(c *imapclient.Client, account *config.Account, folder stri
 		uidSet.AddNum(uid)
 	}
 
+	deliveryHeaderSection := buildDeliveryHeaderSection()
 	msgs, err := c.Fetch(uidSet, &imap.FetchOptions{
-		Envelope: true,
-		UID:      true,
-		Flags:    true,
+		Envelope:    true,
+		UID:         true,
+		Flags:       true,
+		BodySection: []*imap.FetchItemBodySection{deliveryHeaderSection},
 	}).Collect()
 	if err != nil {
 		return nil, fmt.Errorf("imap search fetch: %w", err)
@@ -91,12 +93,13 @@ func searchWithClient(c *imapclient.Client, account *config.Account, folder stri
 			continue
 		}
 		email := Email{
-			UID:       uint32(msg.UID),
-			Subject:   decodeHeader(msg.Envelope.Subject),
-			Date:      msg.Envelope.Date,
-			IsRead:    hasSeenFlag(msg.Flags),
-			MessageID: msg.Envelope.MessageID,
-			AccountID: account.ID,
+			UID:                uint32(msg.UID),
+			Subject:            decodeHeader(msg.Envelope.Subject),
+			Date:               msg.Envelope.Date,
+			IsRead:             hasSeenFlag(msg.Flags),
+			MessageID:          msg.Envelope.MessageID,
+			AccountID:          account.ID,
+			DeliveryRecipients: deliveryRecipients(msg.FindBodySection(deliveryHeaderSection)),
 		}
 		if len(msg.Envelope.From) > 0 {
 			email.From = formatAddress(msg.Envelope.From[0])

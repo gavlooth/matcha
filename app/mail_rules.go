@@ -62,7 +62,7 @@ func (m *Model) finishMailRules(msg mailRuleDoneMsg) tea.Cmd {
 	if msg.result.More {
 		wait = time.Second
 	}
-	cmds := []tea.Cmd{nextMailRuleRun(wait)}
+	cmds := []tea.Cmd{nextMailRuleRun(wait), m.refreshAddressSettingsCmd()}
 	errText := ""
 	if err := errors.Join(msg.result.Errors...); err != nil {
 		errText = "Automatic rules: " + err.Error()

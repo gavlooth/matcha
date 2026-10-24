@@ -183,7 +183,7 @@ func SendEmailCmd(deps *Dependencies, msg tui.SendEmailMsg) tea.Cmd {
 			}
 		}
 
-		jobID, err := deps.Service.QueueEmail(account.ID, recipients, cc, bcc, msg.Subject, body, string(htmlBody), images, attachments, msg.InReplyTo, msg.References, msg.SignSMIME, msg.EncryptSMIME, false, false, delaySeconds, prebuiltRaw)
+		jobID, err := deps.Service.QueueEmail(account.ID, msg.FromOverride, recipients, cc, bcc, msg.Subject, body, string(htmlBody), images, attachments, msg.InReplyTo, msg.References, msg.SignSMIME, msg.EncryptSMIME, false, false, delaySeconds, prebuiltRaw)
 		if err != nil {
 			log.Printf("Failed to queue email: %v", err)
 			return tui.EmailResultMsg{Err: err}

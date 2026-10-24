@@ -53,7 +53,9 @@ const (
 	inputCatchAll           // "true/false" — show all inbox messages regardless of To address
 	inputExtraAddresses     // comma-separated aliases that also deliver to this account
 	inputAlwaysShowMailFrom // comma-separated senders or domains shown even without one of the account's addresses
-	inputJMAPEndpoint       // JMAP session URL
+	inputShowUnaddressedMail
+	inputDiscoverExtraAddresses
+	inputJMAPEndpoint // JMAP session URL
 	inputPOP3Server
 	inputPOP3Port
 	inputMaildirPath // Local Maildir root path
@@ -120,15 +122,23 @@ func NewLogin(hideTips bool) *Login {
 			t.Prompt = "🔓 > "
 		case inputCatchAll:
 			t.Placeholder = "Catch-All (true/false) - Show all inbox messages"
-			t.Prompt = "📬 > "
+			t.Prompt = "Catch-all (true/false) > "
 		case inputExtraAddresses:
-			t.Placeholder = "Extra addresses (comma-separated aliases, optional)"
-			t.Prompt = "🏷️ > "
+			t.Placeholder = "Comma-separated aliases, optional"
+			t.Prompt = "Extra addresses > "
 			t.CharLimit = 1024
 		case inputAlwaysShowMailFrom:
-			t.Placeholder = "Always show mail from (comma-separated senders or domains, optional)"
-			t.Prompt = "⭐ > "
+			t.Placeholder = "Comma-separated senders or domains, optional"
+			t.Prompt = "Always show mail from > "
 			t.CharLimit = 1024
+		case inputShowUnaddressedMail:
+			t.Placeholder = "Show mail addressed to none of your accounts (true/false)"
+			t.Prompt = "Show unaddressed mail (true/false) > "
+			t.SetValue("false")
+		case inputDiscoverExtraAddresses:
+			t.Placeholder = "Add discovered addresses automatically (true/false)"
+			t.Prompt = "Auto-add discovered addresses (true/false) > "
+			t.SetValue("false")
 		case inputJMAPEndpoint:
 			t.Placeholder = "JMAP Session URL (e.g., https://api.fastmail.com/jmap/session)"
 			t.Prompt = "🔗 > "
@@ -189,17 +199,17 @@ func (m *Login) visibleFields() []int {
 	switch proto {
 	case protocolJMAP:
 		// JMAP: no provider selector, just endpoint + common fields
-		fields = append(fields, inputName, inputEmail, inputFetchEmail, inputSendAsEmail, inputCatchAll, inputExtraAddresses, inputAlwaysShowMailFrom, inputAuthMethod, inputPassword, inputJMAPEndpoint)
+		fields = append(fields, inputName, inputEmail, inputFetchEmail, inputSendAsEmail, inputCatchAll, inputExtraAddresses, inputAlwaysShowMailFrom, inputShowUnaddressedMail, inputDiscoverExtraAddresses, inputAuthMethod, inputPassword, inputJMAPEndpoint)
 	case protocolPOP3:
 		// POP3: custom server fields + SMTP for sending
-		fields = append(fields, inputName, inputEmail, inputFetchEmail, inputSendAsEmail, inputCatchAll, inputExtraAddresses, inputAlwaysShowMailFrom, inputPassword,
+		fields = append(fields, inputName, inputEmail, inputFetchEmail, inputSendAsEmail, inputCatchAll, inputExtraAddresses, inputAlwaysShowMailFrom, inputShowUnaddressedMail, inputDiscoverExtraAddresses, inputPassword,
 			inputPOP3Server, inputPOP3Port, inputSMTPServer, inputSMTPPort, inputInsecure)
 	case protocolMaildir:
 		// Maildir: local filesystem only — no auth, no network.
-		fields = append(fields, inputName, inputEmail, inputFetchEmail, inputSendAsEmail, inputCatchAll, inputExtraAddresses, inputAlwaysShowMailFrom, inputMaildirPath)
+		fields = append(fields, inputName, inputEmail, inputFetchEmail, inputSendAsEmail, inputCatchAll, inputExtraAddresses, inputAlwaysShowMailFrom, inputShowUnaddressedMail, inputDiscoverExtraAddresses, inputMaildirPath)
 	default:
 		// IMAP (default): existing flow
-		fields = append(fields, inputProvider, inputName, inputEmail, inputFetchEmail, inputSendAsEmail, inputCatchAll, inputExtraAddresses, inputAlwaysShowMailFrom)
+		fields = append(fields, inputProvider, inputName, inputEmail, inputFetchEmail, inputSendAsEmail, inputCatchAll, inputExtraAddresses, inputAlwaysShowMailFrom, inputShowUnaddressedMail, inputDiscoverExtraAddresses)
 		if hasOAuth {
 			fields = append(fields, inputAuthMethod)
 		}
@@ -373,26 +383,28 @@ func (m *Login) submitForm() func() tea.Msg {
 
 	return func() tea.Msg {
 		return Credentials{
-			Protocol:           proto,
-			Provider:           m.inputs[inputProvider].Value(),
-			Name:               m.inputs[inputName].Value(),
-			Host:               m.inputs[inputEmail].Value(),
-			FetchEmail:         m.inputs[inputFetchEmail].Value(),
-			SendAsEmail:        m.inputs[inputSendAsEmail].Value(),
-			CatchAll:           catchAll,
-			ExtraAddresses:     splitAddressList(m.inputs[inputExtraAddresses].Value()),
-			AlwaysShowMailFrom: splitAddressList(m.inputs[inputAlwaysShowMailFrom].Value()),
-			Password:           m.inputs[inputPassword].Value(),
-			IMAPServer:         m.inputs[inputIMAPServer].Value(),
-			IMAPPort:           imapPort,
-			SMTPServer:         m.inputs[inputSMTPServer].Value(),
-			SMTPPort:           smtpPort,
-			Insecure:           insecure,
-			AuthMethod:         authMethod,
-			JMAPEndpoint:       m.inputs[inputJMAPEndpoint].Value(),
-			POP3Server:         m.inputs[inputPOP3Server].Value(),
-			POP3Port:           pop3Port,
-			MaildirPath:        m.inputs[inputMaildirPath].Value(),
+			Protocol:               proto,
+			Provider:               m.inputs[inputProvider].Value(),
+			Name:                   m.inputs[inputName].Value(),
+			Host:                   m.inputs[inputEmail].Value(),
+			FetchEmail:             m.inputs[inputFetchEmail].Value(),
+			SendAsEmail:            m.inputs[inputSendAsEmail].Value(),
+			CatchAll:               catchAll,
+			ExtraAddresses:         splitAddressList(m.inputs[inputExtraAddresses].Value()),
+			AlwaysShowMailFrom:     splitAddressList(m.inputs[inputAlwaysShowMailFrom].Value()),
+			ShowUnaddressedMail:    m.inputs[inputShowUnaddressedMail].Value() == "true",
+			DiscoverExtraAddresses: m.inputs[inputDiscoverExtraAddresses].Value() == "true",
+			Password:               m.inputs[inputPassword].Value(),
+			IMAPServer:             m.inputs[inputIMAPServer].Value(),
+			IMAPPort:               imapPort,
+			SMTPServer:             m.inputs[inputSMTPServer].Value(),
+			SMTPPort:               smtpPort,
+			Insecure:               insecure,
+			AuthMethod:             authMethod,
+			JMAPEndpoint:           m.inputs[inputJMAPEndpoint].Value(),
+			POP3Server:             m.inputs[inputPOP3Server].Value(),
+			POP3Port:               pop3Port,
+			MaildirPath:            m.inputs[inputMaildirPath].Value(),
 		}
 	}
 }
@@ -447,6 +459,8 @@ func (m *Login) protocolFieldViews(proto string) []string {
 		m.inputs[inputCatchAll].View(),
 		m.inputs[inputExtraAddresses].View(),
 		m.inputs[inputAlwaysShowMailFrom].View(),
+		m.inputs[inputShowUnaddressedMail].View(),
+		m.inputs[inputDiscoverExtraAddresses].View(),
 	}
 
 	switch proto {
@@ -564,6 +578,10 @@ func (m *Login) View() tea.View {
 		tip = "Other addresses that deliver to this mailbox, e.g. old addresses or aliases. Mail sent to them is shown too."
 	case inputAlwaysShowMailFrom:
 		tip = "Senders whose mail is shown even when it names none of your addresses (Bcc). Use an address or a domain, e.g. ee.duth.gr."
+	case inputShowUnaddressedMail:
+		tip = "Show mail whose recipients and delivery headers name none of your configured accounts."
+	case inputDiscoverExtraAddresses:
+		tip = "Opt-in heuristic: add addresses used in at least 3 Sent and 3 hidden INBOX mails. Review manually for shared/imported Sent."
 	case inputJMAPEndpoint:
 		tip = "The JMAP session resource URL (e.g., https://api.fastmail.com/jmap/session)."
 	case inputPOP3Server:
@@ -625,6 +643,12 @@ func (m *Login) SetEditMode(account GoToEditAccountMsg) {
 	}
 	m.inputs[inputExtraAddresses].SetValue(strings.Join(account.ExtraAddresses, ", "))
 	m.inputs[inputAlwaysShowMailFrom].SetValue(strings.Join(account.AlwaysShowMailFrom, ", "))
+	if account.ShowUnaddressedMail {
+		m.inputs[inputShowUnaddressedMail].SetValue("true")
+	}
+	if account.DiscoverExtraAddresses {
+		m.inputs[inputDiscoverExtraAddresses].SetValue("true")
+	}
 	m.inputs[inputAuthMethod].SetValue(account.AuthMethod)
 	m.updateFlags()
 

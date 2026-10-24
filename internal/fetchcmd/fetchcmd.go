@@ -134,7 +134,8 @@ func BackendEmailsToFetcher(emails []backend.Email) []fetcher.Email {
 	for i, e := range emails {
 		result[i] = fetcher.Email{
 			UID: e.UID, From: e.From, To: e.To, ReplyTo: e.ReplyTo,
-			Subject: e.Subject, Body: e.Body, Date: e.Date, IsRead: e.IsRead,
+			DeliveryRecipients: e.DeliveryRecipients,
+			Subject:            e.Subject, Body: e.Body, Date: e.Date, IsRead: e.IsRead,
 			MessageID: e.MessageID, References: e.References, AccountID: e.AccountID,
 		}
 	}

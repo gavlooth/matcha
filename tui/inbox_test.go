@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -501,14 +502,46 @@ func TestInboxLabelsPreserveAddressedAliases(t *testing.T) {
 				if got := inbox.list.Items()[0].(item).accountEmail; got != tc.want {
 					t.Fatalf("combined inbox label = %q, want %q", got, tc.want)
 				}
-				if len(accounts) > 1 {
-					inbox.switchToTab(1)
-					if got := inbox.list.Items()[0].(item).accountEmail; got != tc.want {
-						t.Fatalf("account tab label = %q, want %q", got, tc.want)
-					}
-				}
 			}
 		})
+	}
+}
+
+func TestSelectedAccountRowsShowSenderWithoutRecipientPrefix(t *testing.T) {
+	for _, kind := range []string{"ordinary", "catch-all", "aliases"} {
+		for _, search := range []bool{false, true} {
+			t.Run(kind+fmt.Sprint("/search=", search), func(t *testing.T) {
+				account := config.Account{ID: "one", FetchEmail: "me@example.com"}
+				if kind == "catch-all" {
+					account.CatchAll = true
+				}
+				if kind == "aliases" {
+					account.ExtraAddresses = []string{"alias@example.com"}
+				}
+				accounts := []config.Account{account, {ID: "two", FetchEmail: "other@example.com"}}
+				email := fetcher.Email{
+					UID: 1, AccountID: "one", From: "Alice <alice@example.net>",
+					To: []string{"alias@example.com", "me@example.com"}, Subject: "Project update",
+				}
+				inbox := NewInbox([]fetcher.Email{email}, accounts)
+				inbox.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+				inbox.switchToTab(1)
+				if search {
+					inbox.Update(ApplySearchResultsMsg{Query: backend.ParseSearchQuery("Project"), Emails: []fetcher.Email{email}})
+				}
+				var row strings.Builder
+				itemDelegate{inbox: inbox}.Render(&row, inbox.list, 0, inbox.list.Items()[0])
+				visible := ansi.Strip(row.String())
+				if !strings.Contains(visible, "Alice") || !strings.Contains(visible, "Project update") {
+					t.Fatalf("selected-account row lost sender or subject: %s", visible)
+				}
+				for _, address := range []string{"me@example.com", "alias@example.com"} {
+					if strings.Contains(visible, address) {
+						t.Fatalf("selected-account row repeats recipient %q: %s", address, visible)
+					}
+				}
+			})
+		}
 	}
 }
 

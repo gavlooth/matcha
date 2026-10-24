@@ -463,20 +463,16 @@ func (m *Inbox) updateList() {
 	m.emailsCount = len(displayEmails)
 	m.totalEmailCount = len(displayEmails)
 
-	var showAccountLabel bool
-	if m.searchActive {
+	showAccountLabel := false
+	if m.currentAccountID == "" {
 		showAccountLabel = len(m.accounts) > 1
-	} else if m.currentAccountID == "" {
-		showAccountLabel = len(m.accounts) > 1
-	}
-
-	if !showAccountLabel {
-		for i := range m.accounts {
-			account := &m.accounts[i]
-			if (m.currentAccountID == "" || account.ID == m.currentAccountID) &&
-				(account.CatchAll || len(account.ExtraAddresses) > 0) {
-				showAccountLabel = true
-				break
+		if !showAccountLabel {
+			for i := range m.accounts {
+				account := &m.accounts[i]
+				if account.CatchAll || len(account.ExtraAddresses) > 0 {
+					showAccountLabel = true
+					break
+				}
 			}
 		}
 	}

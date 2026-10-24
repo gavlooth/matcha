@@ -40,7 +40,7 @@ Press `H` to list hidden mail in the open folder for the selected account tab. H
 
 In **Settings → Accounts**, select an account and press `a` to open **Suggested addresses** from hidden To/Cc recipients. They are not verified aliases: add only addresses that belong to you, not teachers, mailing lists or other recipients. Press `Enter` to add the highlighted address to **Extra Addresses**, `x` to ignore it, or `Esc` to return. Use **Always Show Mail From** or a show-in-account rule for Bcc course mail.
 
-When an account has extra addresses, inbox rows show the matching original recipient address, including on that account's own tab. Delivery headers are used when To/Cc do not identify one of its addresses. If Bcc delivery leaves no recipient information, the label falls back to the account's main address; it cannot establish which alias received that message. Aliases remain part of their account rather than separate tabs.
+Each row shows the sender and subject. On an individual account tab, rows omit the account/recipient address prefix because the tab already identifies the account; this also applies to search results. In the combined view, address labels distinguish accounts and preserve the original recipient for extra addresses. Delivery headers are used when To/Cc do not identify one of the account's addresses. If Bcc delivery leaves no recipient information, the label falls back to the account's main address; it cannot establish which alias received that message. Aliases remain part of their account rather than separate tabs.
 
 #### Visual Mode (Multi-Select)
 

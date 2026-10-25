@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/floatpane/matcha/config"
 )
 
@@ -286,12 +288,17 @@ func TestComposerUpdate(t *testing.T) {
 			t.Errorf("After seven Tabs, focusIndex should be %d (focusSend), got %d", focusSend, composer.focusIndex)
 		}
 
+		model, _ = composer.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+		composer = model.(*Composer)
+		if composer.focusIndex != focusVim {
+			t.Fatalf("Tab after Send did not select Vim: %d", composer.focusIndex)
+		}
 		// Simulate one more Tab to wrap around.
 		// With single account, From field is skipped, so it wraps to focusTo.
 		model, _ = composer.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 		composer = model.(*Composer)
 		if composer.focusIndex != focusTo {
-			t.Errorf("After eight Tabs, focusIndex should wrap to %d (focusTo) since single account skips From, got %d", focusTo, composer.focusIndex)
+			t.Errorf("Tab after Vim should return to recipients, got focus %d", composer.focusIndex)
 		}
 	})
 
@@ -404,8 +411,7 @@ func TestComposerUpdate(t *testing.T) {
 			t.Errorf("Initial focusIndex should be %d (focusTo), got %d", focusTo, multiComposer.focusIndex)
 		}
 
-		// Tab through all fields: To -> Cc -> Bcc -> Subject -> Body -> Signature -> Attachment -> Send -> From (wrap)
-		// Crypto toggles are skipped when S/MIME and PGP are not configured.
+		// Crypto toggles are skipped without configured keys or certificates.
 		model, _ := multiComposer.Update(tea.KeyPressMsg{Code: tea.KeyTab}) // To -> Cc
 		multiComposer = model.(*Composer)
 		model, _ = multiComposer.Update(tea.KeyPressMsg{Code: tea.KeyTab}) // Cc -> Bcc
@@ -420,14 +426,16 @@ func TestComposerUpdate(t *testing.T) {
 		multiComposer = model.(*Composer)
 		model, _ = multiComposer.Update(tea.KeyPressMsg{Code: tea.KeyTab}) // Attachment -> Send
 		multiComposer = model.(*Composer)
-		model, _ = multiComposer.Update(tea.KeyPressMsg{Code: tea.KeyTab}) // Send -> From (wrap)
+		model, _ = multiComposer.Update(tea.KeyPressMsg{Code: tea.KeyTab}) // Send -> Vim
+		multiComposer = model.(*Composer)
+		model, _ = multiComposer.Update(tea.KeyPressMsg{Code: tea.KeyTab}) // Vim -> From
 		multiComposer = model.(*Composer)
 		model, _ = multiComposer.Update(tea.KeyPressMsg{Code: tea.KeyTab}) // From -> To (wrap)
 		multiComposer = model.(*Composer)
 
 		// With multiple accounts, From field should be included in tab order
 		if multiComposer.focusIndex != focusTo {
-			t.Errorf("After nine Tabs with multi-account, focusIndex should wrap to %d (focusTo), got %d", focusTo, multiComposer.focusIndex)
+			t.Errorf("Tab cycle should include From and return to recipients, got focus %d", multiComposer.focusIndex)
 		}
 	})
 }
@@ -644,4 +652,239 @@ func TestComposerAliasFromOverridePersistsAndClearsOnAccountSwitch(t *testing.T)
 		t.Fatalf("sent From override = %q", msg.FromOverride)
 	}
 	_ = model
+}
+
+func composerSendClick(test *testing.T, composer *Composer) tea.MouseClickMsg {
+	test.Helper()
+	label := "[ " + t("composer.send") + " ]"
+	for y, line := range strings.Split(ansi.Strip(composer.View().Content), "\n") {
+		if x := strings.Index(line, label); x >= 0 {
+			return tea.MouseClickMsg{X: ansi.StringWidth(line[:x]), Y: y, Button: tea.MouseLeft}
+		}
+	}
+	test.Fatal("Send button not rendered")
+	return tea.MouseClickMsg{}
+}
+
+func TestComposerVisibleVimToggle(t *testing.T) {
+	for _, width := range []int{80, 110} {
+		composer := NewComposer("", "recipient@example.com", "Subject", "αβ🙂", true)
+		composer.Update(tea.WindowSizeMsg{Width: width, Height: 24})
+		sendClick := composerSendClick(t, composer)
+		line := strings.Split(ansi.Strip(composer.View().Content), "\n")[sendClick.Y]
+		x := strings.Index(line, "[ Vim: off ]")
+		if x < 0 || x+len("[ Vim: off ]") > width {
+			t.Fatalf("Vim toggle not visible beside Send at width %d: %q", width, line)
+		}
+		composer.Update(tea.MouseClickMsg{X: x + 2, Y: sendClick.Y, Button: tea.MouseLeft})
+		if composer.vimEditor == nil || composer.focusIndex != focusVim {
+			t.Fatal("click did not select and enable Vim")
+		}
+		if !strings.Contains(ansi.Strip(composer.View().Content), "[ Vim: on ]") {
+			t.Fatal("Vim toggle did not show its enabled state")
+		}
+		composer.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+		if composer.vimEditor != nil {
+			t.Fatal("Enter did not disable Vim")
+		}
+		composer.setFocusTo(focusSend)
+		composer.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+		if composer.focusIndex != focusVim {
+			t.Fatal("Tab did not select the Vim toggle after Send")
+		}
+		composer.Update(tea.KeyPressMsg{Code: ' ', Text: " "})
+		if composer.vimEditor == nil || composer.GetBody() != "αβ🙂" ||
+			composer.GetTo() != "recipient@example.com" || composer.GetSubject() != "Subject" || composer.sendRequested {
+			t.Fatal("Space did not enable Vim while preserving the unsent message")
+		}
+	}
+}
+
+func TestComposerClickSendMatchesKeyboard(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	for _, layout := range []string{"default", "hidden cc bcc", "expanded fields"} {
+		t.Run(layout, func(t *testing.T) {
+			newComposer := func() *Composer {
+				accounts := []config.Account{
+					{ID: "first", Email: "first@example.com"},
+					{ID: "selected", Email: "sender@example.com", CatchAll: true},
+				}
+				composer := NewComposerWithAccounts(accounts, "selected", "Recipient <recipient@example.com>", "Subject", "Body", false)
+				composer.Update(tea.WindowSizeMsg{Width: 100, Height: 45})
+				composer.fromInput.SetValue("Alias <alias@example.com>")
+				composer.ccInput.SetValue("cc@example.com")
+				composer.bccInput.SetValue("bcc@example.com")
+				composer.signatureInput.SetValue("Signature")
+				composer.quotedText = "\n> Quoted text"
+				composer.inReplyTo = "<original@example.com>"
+				composer.references = []string{"<thread@example.com>"}
+				if layout == "hidden cc bcc" {
+					composer.showCcBcc = false
+				}
+				if layout == "expanded fields" {
+					composer.fromError = "Previous From error"
+					composer.toError = "Previous To error"
+					composer.ccError = "Previous Cc error"
+					composer.bccError = "Previous Bcc error"
+					composer.showSuggestions = true
+					composer.suggestions = []config.Contact{{Name: "Recipient", Email: "recipient@example.com"}}
+					composer.attachmentPaths = []string{"/attachment-one.txt", "/attachment-two.txt"}
+					composer.accounts[1].SMIMECert = "/certificate.pem"
+					composer.accounts[1].SMIMEKey = "/key.pem"
+					composer.accounts[1].PGPKeySource = "file"
+					composer.pgpKeysAvailable["recipient@example.com"] = true
+					composer.pgpKeysAvailable["Recipient <recipient@example.com>"] = true
+					composer.signSMIME = true
+					composer.encryptSMIME = true
+					composer.signPGP = true
+					composer.encryptPGP = true
+				}
+				return composer
+			}
+			clicked := newComposer()
+			click := composerSendClick(t, clicked)
+			_, clickCmd := clicked.Update(click)
+			if clickCmd == nil {
+				t.Fatal("clicking rendered Send returned no command")
+			}
+			clickMsg, ok := clickCmd().(SendEmailMsg)
+			if !ok {
+				t.Fatal("clicking rendered Send did not request delivery")
+			}
+			keyboard := newComposer()
+			keyboard.setFocusTo(focusSend)
+			_, keyCmd := keyboard.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+			if keyCmd == nil {
+				t.Fatal("keyboard Send returned no command")
+			}
+			keyMsg, ok := keyCmd().(SendEmailMsg)
+			if !ok || !reflect.DeepEqual(clickMsg, keyMsg) {
+				t.Fatalf("click sent %#v, keyboard sent %#v", clickMsg, keyMsg)
+			}
+			if clickMsg.AccountID != "selected" || clickMsg.FromOverride != "Alias <alias@example.com>" || clickMsg.To != "recipient@example.com" {
+				t.Fatalf("click lost selected account or normalized addresses: %#v", clickMsg)
+			}
+			if clicked.focusIndex != focusSend || clicked.toInput.Focused() || clicked.bodyInput.Focused() {
+				t.Fatal("clicking Send did not move focus away from editors")
+			}
+		})
+	}
+}
+
+func TestComposerClickSendValidation(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	for _, invalid := range []string{"from", "to", "cc", "bcc", "no recipients"} {
+		t.Run(invalid, func(t *testing.T) {
+			composer := NewComposerWithAccounts([]config.Account{{ID: "account", Email: "sender@example.com", CatchAll: true}}, "account", "recipient@example.com", "Subject", "Body", false)
+			composer.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+			switch invalid {
+			case "from":
+				composer.fromInput.SetValue("not-an-address")
+			case "to":
+				composer.toInput.SetValue("not-an-address")
+			case "cc":
+				composer.ccInput.SetValue("not-an-address")
+			case "bcc":
+				composer.bccInput.SetValue("not-an-address")
+			case "no recipients":
+				composer.toInput.SetValue("")
+			}
+			_, cmd := composer.Update(composerSendClick(t, composer))
+			if cmd == nil {
+				t.Fatal("invalid click returned no error notification")
+			}
+			msg := cmd()
+			notice, ok := msg.(NotifyMsg)
+			if !ok || notice.Message == "" {
+				t.Fatalf("invalid click returned %#v, want error notification", msg)
+			}
+			errors := map[string]string{"from": composer.fromError, "to": composer.toError, "cc": composer.ccError, "bcc": composer.bccError}
+			if invalid != "no recipients" {
+				if fieldError := errors[invalid]; fieldError == "" || !strings.Contains(composer.View().Content, fieldError) {
+					t.Fatal("invalid address error is not visible in composer")
+				}
+			}
+			composer.fromInput.SetValue("sender@example.com")
+			composer.toInput.SetValue("recipient@example.com")
+			composer.ccInput.SetValue("")
+			composer.bccInput.SetValue("")
+			_, cmd = composer.Update(composerSendClick(t, composer))
+			if cmd == nil {
+				t.Fatal("corrected fields cannot be sent")
+			}
+			if msg := cmd(); reflect.TypeOf(msg) != reflect.TypeOf(SendEmailMsg{}) {
+				t.Fatalf("corrected fields returned %T, want SendEmailMsg", msg)
+			}
+		})
+	}
+}
+
+func TestComposerSendClickBoundsAndOverlays(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	for _, blocked := range []string{"right click", "left of button", "right of button", "below button", "exit", "accounts", "plugin prompt", "missing keys"} {
+		t.Run(blocked, func(t *testing.T) {
+			composer := NewComposer("", "recipient@example.com", "Subject", "Body", false)
+			click := composerSendClick(t, composer)
+			switch blocked {
+			case "right click":
+				click.Button = tea.MouseRight
+			case "left of button":
+				click.X = -1
+			case "right of button":
+				click.X += composer.sendButtonWidth
+			case "below button":
+				click.Y++
+			case "exit":
+				composer.confirmingExit = true
+			case "accounts":
+				composer.showAccountPicker = true
+			case "plugin prompt":
+				composer.showPluginPrompt = true
+			case "missing keys":
+				composer.wkdConfirmRecipients = []string{"recipient@example.com"}
+			}
+			if _, cmd := composer.Update(click); cmd != nil {
+				t.Fatal("click outside active Send button returned a command")
+			}
+		})
+	}
+}
+
+func TestComposerSendOnlyOnceUntilRestored(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	for _, first := range []string{"click", "keyboard"} {
+		t.Run(first, func(t *testing.T) {
+			composer := NewComposer("", "recipient@example.com", "Subject", "Body", false)
+			click := composerSendClick(t, composer)
+			var activation tea.Msg = click
+			if first == "keyboard" {
+				composer.setFocusTo(focusSend)
+				activation = tea.KeyPressMsg{Code: tea.KeyEnter}
+			}
+			_, send := composer.Update(activation)
+			if send == nil {
+				t.Fatal("first activation returned no send command")
+			}
+			for _, duplicate := range []tea.Msg{click, tea.MouseReleaseMsg{X: click.X, Y: click.Y, Button: tea.MouseLeft}, tea.KeyPressMsg{Code: tea.KeyEnter}} {
+				if _, cmd := composer.Update(duplicate); cmd != nil {
+					t.Fatalf("duplicate activation %T returned another command", duplicate)
+				}
+			}
+			if _, ok := send().(SendEmailMsg); !ok {
+				t.Fatal("first activation did not emit SendEmailMsg")
+			}
+			composer.Init()
+			_, retry := composer.Update(composerSendClick(t, composer))
+			if retry == nil {
+				t.Fatal("restored composer cannot send again after Undo")
+			}
+			if _, ok := retry().(SendEmailMsg); !ok {
+				t.Fatal("restored composer did not emit SendEmailMsg")
+			}
+		})
+	}
 }

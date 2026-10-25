@@ -44,7 +44,25 @@ On startup, `MigrateCacheFiles()` moves any cache files from the old location (`
 
 ## Composer Preferences
 
-`composer_vim_mode` enables in-place Vim editing for the composer body. It defaults to `false` and is omitted from `config.json` while disabled. Recipient and subject fields keep their regular editing behavior. Change the saved default under **Settings → General → Vim mode in composer**; **F4** toggles Vim mode only for the current composer without changing that saved preference. The preference is preserved in both plain and encrypted configuration.
+`composer_vim_mode` enables in-place Vim editing for the composer body. It defaults to `false` and is omitted from `config.json` while disabled. Recipient and subject fields keep their regular editing behavior. Change the saved default under **Settings → General → Vim mode in composer**. The **[ Vim: off/on ]** button beside Send toggles the current composer by click or Tab then Enter/Space; **Ctrl+G** and **F4** are alternatives. These per-message toggles do not change the saved preference, which is preserved in both plain and encrypted configuration.
+
+## Contact Autocomplete
+
+`SearchContactsForAccount` searches the secure contacts cache and the current
+`mailing_lists` in `config.json`. Mailing lists remain virtual contacts with
+expanded `Addresses`, ahead of regular contacts; regular contacts are filtered
+and ranked using the selected account's usage. Results are limited to five.
+
+Autocomplete reads only mailing-list metadata through `SecureReadFile`, so it
+supports both plain and encrypted configuration without executing `pass_cmd`,
+accessing the OS keyring, migrating credentials, or reloading keybinds on each
+recipient edit. Missing or unreadable/invalid mailing-list configuration omits
+lists but still returns cached contacts. If the contacts cache cannot be loaded,
+search returns no suggestions, as before.
+
+The metadata is read on each search rather than cached, so saved list changes
+are visible immediately without introducing cache invalidation or changing the
+search API.
 
 ## Files
 

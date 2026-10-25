@@ -1,6 +1,8 @@
 package config
 
 import (
+	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -190,6 +192,156 @@ func TestContacts_SearchEmpty(t *testing.T) {
 	setup(t)
 	if results := SearchContacts(""); len(results) != 0 {
 		t.Errorf("SearchContacts(\"\") should return nil, got %d results", len(results))
+	}
+}
+
+func TestContacts_SearchDoesNotResolveCredentials(t *testing.T) {
+	for _, mode := range []string{"plain", "encrypted"} {
+		t.Run(mode, func(t *testing.T) {
+			setup(t)
+			forgetVault := func() {
+				vaultMu.Lock()
+				defer vaultMu.Unlock()
+				if cachedVault != nil {
+					cachedVault.Lock()
+				}
+				cachedVault = nil
+			}
+			forgetVault()
+			t.Cleanup(forgetVault)
+
+			marker := filepath.Join(t.TempDir(), "password-command-ran")
+			t.Setenv("MATCHA_TEST_PASSWORD_MARKER", marker)
+			cfg := &Config{
+				Accounts: []Account{{
+					ID:      "account-1",
+					Email:   "sender@example.com",
+					PassCmd: `printf invoked >> "$MATCHA_TEST_PASSWORD_MARKER"; printf test-password`,
+				}},
+				MailingLists: []MailingList{{
+					Name:      "Team list",
+					Addresses: []string{"first@example.com", "second@example.com"},
+				}},
+			}
+			if mode == "encrypted" {
+				if err := EnableSecureMode("test-password", cfg); err != nil {
+					t.Fatalf("EnableSecureMode: %v", err)
+				}
+			} else if err := SaveConfig(cfg); err != nil {
+				t.Fatalf("SaveConfig: %v", err)
+			}
+			cache := &ContactsCache{Contacts: []Contact{
+				{
+					Name:  "Team Alice",
+					Email: "alice@example.com",
+					Usage: map[string]ContactUsage{
+						"account-1": {UseCount: 2},
+						"account-2": {UseCount: 9},
+					},
+				},
+				{
+					Name:  "Team Bob",
+					Email: "bob@example.com",
+					Usage: map[string]ContactUsage{
+						"account-1": {UseCount: 9},
+						"account-2": {UseCount: 2},
+					},
+				},
+				{
+					Name:  "Team Other",
+					Email: "other@example.com",
+					Usage: map[string]ContactUsage{
+						"account-3": {UseCount: 100},
+					},
+				},
+			}}
+			if err := SaveContactsCache(cache); err != nil {
+				t.Fatalf("SaveContactsCache: %v", err)
+			}
+			path, err := configFile()
+			if err != nil {
+				t.Fatal(err)
+			}
+			before, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if mode == "encrypted" && json.Valid(before) {
+				t.Fatal("config must be encrypted on disk")
+			}
+
+			for _, account := range []struct {
+				id    string
+				first string
+				last  string
+			}{
+				{"account-1", "bob@example.com", "alice@example.com"},
+				{"account-2", "alice@example.com", "bob@example.com"},
+			} {
+				for _, query := range []string{"te", "tea", " TEAM "} {
+					matches := SearchContactsForAccount(query, account.id)
+					if len(matches) != 3 {
+						t.Fatalf("query %q for %s: got %+v, want a list and two contacts", query, account.id, matches)
+					}
+					list := matches[0]
+					if list.Name != "Team list" || list.Email != "" || !slices.Equal(list.Addresses, cfg.MailingLists[0].Addresses) {
+						t.Errorf("mailing list lost its expanded recipients: %+v", list)
+					}
+					if matches[1].Email != account.first || matches[2].Email != account.last {
+						t.Errorf("query %q for %s: incorrect account ranking: %+v", query, account.id, matches)
+					}
+				}
+			}
+			if _, err := os.Stat(marker); !os.IsNotExist(err) {
+				t.Errorf("contact search executed the password command (marker stat: %v)", err)
+			}
+			after, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(before, after) {
+				t.Error("contact search rewrote the config")
+			}
+		})
+	}
+}
+
+func TestContacts_SearchWithUnavailableConfig(t *testing.T) {
+	for _, configData := range []struct {
+		name string
+		data string
+	}{
+		{"missing", ""},
+		{"invalid JSON", `{"mailing_lists":`},
+		{"invalid mailing list", `{"mailing_lists":[{"name":"Team list","addresses":42}]}`},
+		{"unreadable path", ""},
+	} {
+		t.Run(configData.name, func(t *testing.T) {
+			setup(t)
+			if err := AddContactForAccount("Team Alice", "alice@example.com", "account-1"); err != nil {
+				t.Fatalf("AddContactForAccount: %v", err)
+			}
+			path, err := configFile()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if configData.name != "missing" {
+				if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+					t.Fatal(err)
+				}
+				if configData.name == "unreadable path" {
+					if err := os.Mkdir(path, 0700); err != nil {
+						t.Fatal(err)
+					}
+				} else if err := SecureWriteFile(path, []byte(configData.data), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			matches := SearchContactsForAccount("team", "account-1")
+			if len(matches) != 1 || matches[0].Email != "alice@example.com" {
+				t.Fatalf("unavailable config should not hide cached contacts: %+v", matches)
+			}
+		})
 	}
 }
 

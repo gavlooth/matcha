@@ -117,7 +117,7 @@ Replies use the configured extra address named in the original To/Cc or delivery
 
 #### Vim mode
 
-Press **F4** in the composer to toggle Vim-style body editing for that message. To enable it for new compositions, replies, forwards and reopened drafts, turn on **Settings → General → Vim mode in composer** (`composer_vim_mode: true` in configuration). It is off by default. Recipient, subject and signature fields remain ordinary inputs.
+Select **[ Vim: off/on ]** beside **Send** to toggle Vim-style body editing for that message: click it, or reach it with **Tab** and press **Enter** or **Space**. **Ctrl+G** and **F4** also toggle it. To enable it for new compositions, replies, forwards and reopened drafts, turn on **Settings → General → Vim mode in composer** (`composer_vim_mode: true` in configuration). It is off by default. Recipient, subject and signature fields remain ordinary inputs.
 
 The footer shows **NORMAL**, **INSERT**, **VISUAL** or **VISUAL LINE** while the body is focused.
 

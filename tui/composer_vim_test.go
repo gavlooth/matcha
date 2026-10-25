@@ -92,6 +92,26 @@ func TestComposerVimTogglePreservesBodyAndFieldNavigation(t *testing.T) {
 	}
 }
 
+func TestComposerCtrlGTogglesVimWithoutChangingMessage(t *testing.T) {
+	composer := NewComposer("", "recipient@example.com", "Subject", "αβ🙂", true)
+	composer.setFocusTo(focusBody)
+	toggle := tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl}
+	composer.Update(toggle)
+	if composer.vimEditor == nil {
+		t.Fatal("Ctrl+G did not enable Vim")
+	}
+	typeComposerKeys(composer, "A!")
+	composer.Update(toggle)
+	if composer.vimEditor != nil || composer.GetBody() != "αβ🙂!" {
+		t.Fatal("Ctrl+G did not leave Vim insertion without losing text")
+	}
+	composer.setFocusTo(focusTo)
+	composer.Update(toggle)
+	if composer.vimEditor == nil || composer.GetTo() != "recipient@example.com" || composer.GetSubject() != "Subject" {
+		t.Fatal("Ctrl+G in a header changed message fields instead of toggling Vim")
+	}
+}
+
 func TestComposerVimExternalBodyReplacementClearsOldUndo(t *testing.T) {
 	composer := vimComposer("old text")
 	typeComposerKeys(composer, "dd")

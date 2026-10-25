@@ -305,6 +305,26 @@ func ContactAggregateUsage(c Contact) ContactUsage {
 	return usage
 }
 
+// loadContactMailingLists reads only autocomplete metadata, without resolving
+// account credentials or applying the migrations and keybinds in LoadConfig.
+func loadContactMailingLists() ([]MailingList, error) {
+	path, err := configFile()
+	if err != nil {
+		return nil, err
+	}
+	data, err := SecureReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var metadata struct {
+		MailingLists []MailingList `json:"mailing_lists"`
+	}
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		return nil, err
+	}
+	return metadata.MailingLists, nil
+}
+
 // SearchContacts searches for contacts matching the query across all accounts.
 func SearchContacts(query string) []Contact {
 	return SearchContactsForAccount(query, "")
@@ -324,10 +344,10 @@ func SearchContactsForAccount(query, accountID string) []Contact {
 
 	var matches []Contact
 
-	// Add mailing lists to matches if they match the query
-	cfg, err := LoadConfig()
+	// Add mailing lists without loading account credentials on each keystroke.
+	lists, err := loadContactMailingLists()
 	if err == nil {
-		for _, list := range cfg.MailingLists {
+		for _, list := range lists {
 			if strings.Contains(strings.ToLower(list.Name), query) {
 				// Convert mailing list to a virtual contact. Addresses are
 				// stored in a dedicated slice so the Email field keeps its

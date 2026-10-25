@@ -62,6 +62,7 @@ const (
 	focusSignPGP
 	focusEncryptPGP
 	focusSend
+	focusVim
 )
 
 // Composer model holds the state of the email composition UI.
@@ -89,6 +90,12 @@ type Composer struct {
 	height           int
 	confirmingExit   bool
 	hideTips         bool
+
+	sendButtonY     int
+	sendButtonWidth int
+	sendRequested   bool
+	vimButtonX      int
+	vimButtonWidth  int
 
 	// Multi-account support
 	accounts           []config.Account
@@ -161,6 +168,7 @@ func NewComposer(from, to, subject, body string, hideTips bool) *Composer {
 	m := &Composer{
 		draftID:          uuid.New().String(),
 		hideTips:         hideTips,
+		sendButtonY:      -1,
 		attachmentNames:  make(map[string]string),
 		pgpKeysAvailable: make(map[string]bool),
 		showCcBcc:        true, // Default to showing CC/BCC for backward compatibility
@@ -301,6 +309,49 @@ func (m *Composer) canSendEmail() bool {
 	m.validateEmailField(focusCc)
 	m.validateEmailField(focusBcc)
 	return m.fromError == "" && m.toError == "" && m.ccError == "" && m.bccError == ""
+}
+
+// sendEmailCmd is shared by keyboard and mouse activation of Send.
+func (m *Composer) sendEmailCmd() tea.Cmd {
+	if m.sendRequested {
+		return nil
+	}
+	if !m.canSendEmail() {
+		message := t("composer.invalid_email_fields")
+		return func() tea.Msg { return NotifyMsg{Message: message} }
+	}
+	if !m.hasAnyRecipient() {
+		message := t("composer.recipient_required")
+		return func() tea.Msg { return NotifyMsg{Message: message} }
+	}
+	accountID := ""
+	if acc := m.getSelectedAccount(); acc != nil {
+		accountID = acc.ID
+	}
+	fromOverride := ""
+	if m.isCatchAllAccount() || m.fromOverrideSet {
+		fromOverride = m.fromInput.Value()
+	}
+	msg := SendEmailMsg{
+		To:              m.toInput.Value(),
+		Cc:              m.ccInput.Value(),
+		Bcc:             m.bccInput.Value(),
+		Subject:         m.subjectInput.Value(),
+		Body:            m.bodyInput.Value(),
+		AttachmentPaths: m.attachmentPaths,
+		AccountID:       accountID,
+		FromOverride:    fromOverride,
+		QuotedText:      m.quotedText,
+		InReplyTo:       m.inReplyTo,
+		References:      m.references,
+		Signature:       m.signatureInput.Value(),
+		SignSMIME:       m.signSMIMEEnabled(),
+		EncryptSMIME:    m.encryptSMIME,
+		SignPGP:         m.signPGP,
+		EncryptPGP:      m.encryptPGP,
+	}
+	m.sendRequested = true
+	return func() tea.Msg { return msg }
 }
 
 // updateSignature updates the signature input based on the current selected account.
@@ -485,7 +536,7 @@ func (m *Composer) orderedFocusIndices() []int {
 		focusAttachment,
 	)
 	indices = append(indices, m.visibleCryptoToggles()...)
-	indices = append(indices, focusSend)
+	indices = append(indices, focusSend, focusVim)
 
 	result := make([]int, 0, len(indices))
 	for _, idx := range indices {
@@ -572,6 +623,8 @@ func (m *Composer) SetSpellcheckOptions(disableCheck, disableSuggestions bool) {
 }
 
 func (m *Composer) Init() tea.Cmd {
+	// Undo Send restores this composer and initializes it again.
+	m.sendRequested = false
 	cmds := []tea.Cmd{textinput.Blink}
 	if !m.disableSpellcheck {
 		cmds = append(cmds, loadSpellcheckCmd())
@@ -999,7 +1052,16 @@ func (m *Composer) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 		return m, nil
 
 	case tea.MouseClickMsg:
-		if msg.Button == tea.MouseLeft && !m.confirmingExit && !m.showAccountPicker && !m.showPluginPrompt {
+		if msg.Button == tea.MouseLeft && !m.confirmingExit && !m.showAccountPicker && !m.showPluginPrompt && len(m.wkdConfirmRecipients) == 0 {
+			if msg.Y == m.sendButtonY && msg.X >= 0 && msg.X < m.sendButtonWidth {
+				m.setFocusTo(focusSend)
+				return m, m.sendEmailCmd()
+			}
+			if msg.Y == m.sendButtonY && msg.X >= m.vimButtonX && msg.X < m.vimButtonX+m.vimButtonWidth {
+				m.setFocusTo(focusVim)
+				m.SetVimMode(m.vimEditor == nil)
+				return m, nil
+			}
 			bodyH := m.bodyInput.Height()
 			sigH := m.signatureInput.Height()
 			var newFocus int
@@ -1097,7 +1159,7 @@ func (m *Composer) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 
 	case tea.KeyPressMsg:
 		// Handle contact suggestions mode
-		if m.showSuggestions && len(m.suggestions) > 0 {
+		if m.focusIndex == focusTo && m.showSuggestions && len(m.suggestions) > 0 {
 			switch msg.String() {
 			case "up", "ctrl+p":
 				if m.selectedSuggestion > 0 {
@@ -1222,7 +1284,7 @@ func (m *Composer) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 			}
 		}
 
-		if msg.String() == "f4" {
+		if msg.String() == "f4" || msg.String() == "ctrl+g" {
 			m.SetVimMode(m.vimEditor == nil)
 			return m, nil
 		}
@@ -1356,8 +1418,16 @@ func (m *Composer) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 				return m, nil
 			}
 
+		case "space":
+			if m.focusIndex == focusVim {
+				m.SetVimMode(m.vimEditor == nil)
+				return m, nil
+			}
 		case keyEnter, " ":
 			switch m.focusIndex {
+			case focusVim:
+				m.SetVimMode(m.vimEditor == nil)
+				return m, nil
 			case focusFrom:
 				if msg.String() == keyEnter && len(m.accounts) > 1 {
 					m.showAccountPicker = true
@@ -1405,43 +1475,7 @@ func (m *Composer) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 
 			case focusSend:
 				if msg.String() == keyEnter {
-					if !m.canSendEmail() {
-						msg := t("composer.invalid_email_fields")
-						return m, func() tea.Msg { return NotifyMsg{Message: msg} }
-					}
-					if !m.hasAnyRecipient() {
-						msg := t("composer.recipient_required")
-						return m, func() tea.Msg { return NotifyMsg{Message: msg} }
-					}
-					acc := m.getSelectedAccount()
-					accountID := ""
-					if acc != nil {
-						accountID = acc.ID
-					}
-					fromOverride := ""
-					if m.isCatchAllAccount() || m.fromOverrideSet {
-						fromOverride = m.fromInput.Value()
-					}
-					return m, func() tea.Msg {
-						return SendEmailMsg{
-							To:              m.toInput.Value(),
-							Cc:              m.ccInput.Value(),
-							Bcc:             m.bccInput.Value(),
-							Subject:         m.subjectInput.Value(),
-							Body:            m.bodyInput.Value(),
-							AttachmentPaths: m.attachmentPaths,
-							AccountID:       accountID,
-							FromOverride:    fromOverride,
-							QuotedText:      m.quotedText,
-							InReplyTo:       m.inReplyTo,
-							References:      m.references,
-							Signature:       m.signatureInput.Value(),
-							SignSMIME:       m.signSMIMEEnabled(),
-							EncryptSMIME:    m.encryptSMIME,
-							SignPGP:         m.signPGP,
-							EncryptPGP:      m.encryptPGP,
-						}
-					}
+					return m, m.sendEmailCmd()
 				}
 			}
 		}
@@ -1543,6 +1577,9 @@ func (m *Composer) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 }
 
 func (m *Composer) View() tea.View { //nolint:gocyclo
+	m.sendButtonY = -1
+	m.sendButtonWidth = 0
+	m.vimButtonWidth = 0
 	var composerView strings.Builder
 	var button string
 	ck := config.Keybinds.Composer
@@ -1551,6 +1588,14 @@ func (m *Composer) View() tea.View { //nolint:gocyclo
 		button = focusedStyle.Render("[ " + t("composer.send") + " ]")
 	} else {
 		button = blurredStyle.Render("[ " + t("composer.send") + " ]")
+	}
+	vimLabel := "[ Vim: off ]"
+	if m.vimEditor != nil {
+		vimLabel = "[ Vim: on ]"
+	}
+	vimButton := blurredStyle.Render(vimLabel)
+	if m.focusIndex == focusVim {
+		vimButton = focusedStyle.Render(vimLabel)
 	}
 
 	// From field with account selector
@@ -1723,6 +1768,8 @@ func (m *Composer) View() tea.View { //nolint:gocyclo
 		tip = "Press Space or Enter to toggle PGP encryption on or off."
 	case focusSend:
 		tip = "Press Enter to send the email."
+	case focusVim:
+		tip = "Click or press Enter/Space to toggle Vim editing for this message."
 	}
 
 	bodyView := m.bodyInput.View()
@@ -1764,8 +1811,12 @@ func (m *Composer) View() tea.View { //nolint:gocyclo
 			composerViewElements = append(composerViewElements, smimeToggleStyle.Render(encPGPField))
 		}
 	}
+	sendButtonY := 0
+	for _, element := range composerViewElements {
+		sendButtonY += lipgloss.Height(element)
+	}
 	composerViewElements = append(composerViewElements,
-		button,
+		button+"  "+vimButton,
 		"",
 	)
 
@@ -1783,12 +1834,12 @@ func (m *Composer) View() tea.View { //nolint:gocyclo
 		case vimedit.Visual, vimedit.VisualLine:
 			modeHelp = "d/c/y: selection • Esc: normal"
 		}
-		helpText = "Vim " + m.vimEditor.Mode().String() + " • F4: off • " + modeHelp + " • " +
+		helpText = "Vim " + m.vimEditor.Mode().String() + " • Ctrl+G/F4: off • " + modeHelp + " • " +
 			ck.NextField + "/" + ck.PrevField + ": fields • " + ck.ExternalEditor + ": editor"
 	} else if m.vimEditor != nil {
-		helpText = "F4: Vim off (body enabled) • " + helpText
+		helpText = "Ctrl+G/F4: Vim off (body enabled) • " + helpText
 	} else {
-		helpText = "F4: Vim on • " + helpText
+		helpText = "Ctrl+G/F4: Vim on • " + helpText
 	}
 	for _, pk := range m.pluginKeyBindings {
 		helpText += " • " + pk.Key + ": " + pk.Description
@@ -1875,6 +1926,11 @@ func (m *Composer) View() tea.View { //nolint:gocyclo
 		)
 		return tea.NewView(lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog))
 	}
+
+	m.sendButtonY = sendButtonY
+	m.sendButtonWidth = lipgloss.Width(button)
+	m.vimButtonX = m.sendButtonWidth + 2
+	m.vimButtonWidth = lipgloss.Width(vimButton)
 
 	out := composerView.String()
 	if m.spellShow && len(m.spellSuggestions) > 0 && m.focusIndex == focusBody {

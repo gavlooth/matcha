@@ -6,6 +6,12 @@ The `tui` package contains all terminal user interface components built with the
 
 The TUI layer is the interactive frontend of Matcha. Each view implements the `tea.Model` interface (`Init`, `Update`, `View`) and communicates with other views through typed messages. The main application (`main.go`) orchestrates navigation between views by swapping the active model.
 
+### Sending from the composer
+
+Left-click the visible **Send** button, or focus it and press **Enter**. Both actions validate the From, To, Cc, and Bcc fields and require at least one recipient before sending with the selected account. Invalid addresses remain in the composer with inline errors and an error notification, so they can be corrected and sent again.
+
+The Send button's mouse target follows the rendered layout, including contact suggestions, validation errors, attachments, and signing/encryption controls. Repeated clicks or Enter presses cannot request the same send twice while the application is handling it; restoring the composer through Undo Send allows another send.
+
 ### Views
 
 | File | Description |
@@ -39,5 +45,5 @@ The TUI layer is the interactive frontend of Matcha. Each view implements the `t
 |------|-------------|
 | `inbox_test.go` | Tests for inbox rendering and behavior. |
 | `email_view_test.go` | Tests for email view rendering. |
-| `composer_test.go` | Tests for email composition logic. |
+| `composer_test.go` | Tests for email composition, rendered Send-button clicks, keyboard parity, address validation, and duplicate-send prevention. |
 | `trash_archive_test.go` | Tests for trash/archive view behavior. |

@@ -42,6 +42,10 @@ Cache (`~/.cache/matcha/`):
 
 On startup, `MigrateCacheFiles()` moves any cache files from the old location (`~/.config/matcha/`) to `~/.cache/matcha/`.
 
+## Composer Preferences
+
+`composer_vim_mode` enables in-place Vim editing for the composer body. It defaults to `false` and is omitted from `config.json` while disabled. Recipient and subject fields keep their regular editing behavior. Change the saved default under **Settings → General → Vim mode in composer**; **F4** toggles Vim mode only for the current composer without changing that saved preference. The preference is preserved in both plain and encrypted configuration.
+
 ## Files
 
 | File | Description |

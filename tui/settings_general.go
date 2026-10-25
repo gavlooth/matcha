@@ -33,6 +33,7 @@ func (m *Settings) buildGeneralOptions() []generalOption {
 		{"settings_general.mouse_support", onOff(config.MouseEnabled != nil && *config.MouseEnabled), "Enable mouse clicks and scroll wheel in the TUI. Takes effect immediately."},
 		{"settings_general.show_original_on_reply", onOff(m.cfg.ShowOriginalOnReply), "Show the original email alongside the composer when replying."},
 		{"settings_general.show_cc_bcc_by_default", onOff(m.cfg.ShowCcBccByDefault), "Show CC/BCC fields by default when composing new emails."},
+		{"settings_general.composer_vim_mode", onOff(m.cfg.ComposerVimMode), t("settings_general.composer_vim_mode_tip")},
 	}
 
 	return opts
@@ -148,6 +149,13 @@ func (m *Settings) handleGeneralOption(idx int, key string) (*Settings, tea.Cmd)
 	case 15: // Show CC/BCC by Default
 		m.cfg.ShowCcBccByDefault = !m.cfg.ShowCcBccByDefault
 		_ = config.SaveConfig(m.cfg)
+		saved = true
+	case 16: // Composer Vim Mode
+		m.cfg.ComposerVimMode = !m.cfg.ComposerVimMode
+		if err := config.SaveConfig(m.cfg); err != nil {
+			m.cfg.ComposerVimMode = !m.cfg.ComposerVimMode
+			return m, func() tea.Msg { return NotifyMsg{Message: err.Error()} }
+		}
 		saved = true
 	}
 	if saved {

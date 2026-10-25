@@ -246,6 +246,7 @@ type Config struct {
 	EnableDetailedDates     bool                `json:"enable_detailed_dates,omitempty"`
 	DisableSpellcheck       bool                `json:"disable_spellcheck,omitempty"`
 	DisableSpellSuggestions bool                `json:"disable_spell_suggestions,omitempty"`
+	ComposerVimMode         bool                `json:"composer_vim_mode,omitempty"`
 	Theme                   string              `json:"theme,omitempty"`
 	MailingLists            []MailingList       `json:"mailing_lists,omitempty"`
 	DateFormat              string              `json:"date_format,omitempty"`
@@ -698,6 +699,7 @@ type secureDiskConfig struct {
 	EnableDetailedDates     bool                              `json:"enable_detailed_dates,omitempty"`
 	DisableSpellcheck       bool                              `json:"disable_spellcheck,omitempty"`
 	DisableSpellSuggestions bool                              `json:"disable_spell_suggestions,omitempty"`
+	ComposerVimMode         bool                              `json:"composer_vim_mode,omitempty"`
 	Theme                   string                            `json:"theme,omitempty"`
 	MailingLists            []MailingList                     `json:"mailing_lists,omitempty"`
 	DateFormat              string                            `json:"date_format,omitempty"`
@@ -764,6 +766,7 @@ func SaveConfig(config *Config) error {
 			EnableDetailedDates:     config.EnableDetailedDates,
 			DisableSpellcheck:       config.DisableSpellcheck,
 			DisableSpellSuggestions: config.DisableSpellSuggestions,
+			ComposerVimMode:         config.ComposerVimMode,
 			Theme:                   config.Theme,
 			MailingLists:            config.MailingLists,
 			DateFormat:              config.DateFormat,
@@ -905,6 +908,7 @@ func LoadConfig() (*Config, error) {
 		EnableDetailedDates     bool                              `json:"enable_detailed_dates,omitempty"`
 		DisableSpellcheck       bool                              `json:"disable_spellcheck,omitempty"`
 		DisableSpellSuggestions bool                              `json:"disable_spell_suggestions,omitempty"`
+		ComposerVimMode         bool                              `json:"composer_vim_mode,omitempty"`
 		Theme                   string                            `json:"theme,omitempty"`
 		MailingLists            []MailingList                     `json:"mailing_lists,omitempty"`
 		DateFormat              string                            `json:"date_format,omitempty"`
@@ -956,6 +960,7 @@ func LoadConfig() (*Config, error) {
 	config.EnableDetailedDates = raw.EnableDetailedDates
 	config.DisableSpellcheck = raw.DisableSpellcheck
 	config.DisableSpellSuggestions = raw.DisableSpellSuggestions
+	config.ComposerVimMode = raw.ComposerVimMode
 	config.Theme = raw.Theme
 	config.MailingLists = raw.MailingLists
 	config.DateFormat = raw.DateFormat

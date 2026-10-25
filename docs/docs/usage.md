@@ -115,6 +115,31 @@ Example: `from:alice invoice since:2026-01-01` finds mail from alice that mentio
 
 Replies use the configured extra address named in the original To/Cc or delivery headers; the main fetch address takes precedence when both are present. The selected address is preserved in drafts and queued sends. Switching accounts clears the reply override and uses the new account's sender.
 
+#### Vim mode
+
+Press **F4** in the composer to toggle Vim-style body editing for that message. To enable it for new compositions, replies, forwards and reopened drafts, turn on **Settings → General → Vim mode in composer** (`composer_vim_mode: true` in configuration). It is off by default. Recipient, subject and signature fields remain ordinary inputs.
+
+The footer shows **NORMAL**, **INSERT**, **VISUAL** or **VISUAL LINE** while the body is focused.
+
+| Action | Keys |
+| --- | --- |
+| Insert before/after cursor; insert at first nonblank/end of line | `i` / `a`; `I` / `A` |
+| Open a line below/above | `o` / `O` |
+| Move through characters, lines or words | `h j k l`, arrows, `w b e` (`W B E` for whitespace-separated words) |
+| Start/first nonblank/end of line; start/end of body | `0` / `^` / `$`; `gg` / `G` |
+| Delete/change/yank a motion or whole lines | `d` / `c` / `y` plus a motion; `dd` / `cc` / `yy` |
+| Delete/change/yank the inner word | `diw` / `ciw` / `yiw` |
+| Delete character or through end of line | `x` / `X`; `D` (`C` changes through the line end) |
+| Select characters or lines | `v` / `V`, then motions; `d` / `c` / `y` acts on the selection |
+| Paste after/before cursor or replace a selection | `p` / `P` |
+| Undo/redo; repeat last edit | `u` / `Ctrl+R`; `.` |
+
+Counts work with motions and edits, including `5j`, `3dd` and `2d3w`. One insertion session is one undo step. Yanked/deleted text uses an internal register, not the system clipboard. Visual `p` retains the replaced selection in that register; visual `P` preserves the previous register.
+
+**Esc in the body returns to Normal mode or cancels a pending command; it does not exit the composer.** `Tab`/`Shift+Tab` still move between fields. To save the draft and leave, move out of the body, then press `Esc`. `Ctrl+C` retains the existing save-on-quit behavior. Pasted text is inserted literally, never interpreted as Vim commands.
+
+This is in-place Vim-style editing, not a complete Vim runtime: Ex commands, macros and Vim plugins are not supported. For full Vim/Neovim, `Ctrl+E` still opens your configured external editor and imports the resulting body when you return.
+
 ## Automatic Email Rules
 
 Open **Settings → Rules** to manage local rules for your IMAP accounts. Rules run while the Matcha TUI is open, including when you are on the start menu or composing mail. They do not run in the background daemon after you close the TUI, and do not require Sieve or provider-specific authorization.

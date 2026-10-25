@@ -229,7 +229,7 @@ func (m *Model) updateCurrentFromConfig(cfg *config.Config, mailtoURL *url.URL) 
 	case mailtoURL != nil:
 		to, subject, body := parseMailto(mailtoURL)
 		composer := tui.NewComposerWithAccounts(cfg.Accounts, cfg.Accounts[0].ID, to, subject, body, cfg.HideTips)
-		composer.SetSpellcheckOptions(cfg.DisableSpellcheck, cfg.DisableSpellSuggestions)
+		m.applyComposerOptions(composer)
 		m.current = composer
 	case !cfg.HasSeenSetupGuide:
 		m.current = newSetupGuide()
@@ -299,11 +299,12 @@ func getCurrentComposer(current tea.Model) *tui.Composer {
 	return nil
 }
 
-func (m *Model) applySpellcheckOptions(c *tui.Composer) {
+func (m *Model) applyComposerOptions(c *tui.Composer) {
 	if c == nil || m.config == nil {
 		return
 	}
 	c.SetSpellcheckOptions(m.config.DisableSpellcheck, m.config.DisableSpellSuggestions)
+	c.SetVimMode(m.config.ComposerVimMode)
 }
 
 func (m *Model) ensureProviders() {
@@ -1081,7 +1082,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 	} else if keyMsg, ok := msg.(tea.KeyPressMsg); ok &&
 		config.Keybinds.Global.CommandPalette != "" &&
 		keyMsg.String() == config.Keybinds.Global.CommandPalette &&
-		palette.Allowed(m.current) {
+		palette.Allowed(m.current) && !m.composerHasVimFocus() {
 		cmd := m.palette.Open(palette.BuildCommands(m.current, m.folderInbox, m.config), m.width, m.contentHeight())
 		return m, cmd
 	}
@@ -1113,7 +1114,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 		if composer := getCurrentComposer(m.current); composer != nil && m.plugins != nil {
 			m.startComposerHooks(composer)
 		}
-		if m.plugins != nil && !m.isSearchOverlayOpen() {
+		if m.plugins != nil && !m.isSearchOverlayOpen() && !m.composerHasVimFocus() {
 			if bindingCmd := m.handlePluginKeyBinding(keyMsg); bindingCmd != nil {
 				cmds = append(cmds, bindingCmd)
 			}
@@ -1122,18 +1123,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
-		if m.showErrorNotif && msg.String() == config.Keybinds.Global.DismissNotification {
+		if m.showErrorNotif && msg.String() == config.Keybinds.Global.DismissNotification && !m.composerHasVimFocus() {
 			m.showErrorNotif = false
 			return m, nil
 		}
 		if m.showPluginNotif && m.pluginNotification.Done() {
 			m.showPluginNotif = false
 		}
-		if m.showPluginNotif && msg.String() == config.Keybinds.Global.DismissNotification {
+		if m.showPluginNotif && msg.String() == config.Keybinds.Global.DismissNotification && !m.composerHasVimFocus() {
 			m.showPluginNotif = false
 			return m, nil
 		}
-		if msg.String() == config.Keybinds.Composer.UndoSend {
+		if msg.String() == config.Keybinds.Composer.UndoSend && !m.composerHasVimFocus() {
 			if m.actionManager.IsPending() {
 				m.actionManager.RestorePendingAction()
 				return m, nil
@@ -1738,7 +1739,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 		if m.config != nil {
 			composer.SetShowCcBcc(m.config.ShowCcBccByDefault)
 		}
-		m.applySpellcheckOptions(composer)
+		m.applyComposerOptions(composer)
 		m.current = composer
 		m.updateCurrentWindowSize()
 		m.syncPluginKeyBindings()
@@ -1761,7 +1762,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 		if m.config != nil {
 			composer.SetShowCcBcc(m.config.ShowCcBccByDefault)
 		}
-		m.applySpellcheckOptions(composer)
+		m.applyComposerOptions(composer)
 		m.current = composer
 		m.updateCurrentWindowSize()
 		m.syncPluginKeyBindings()
@@ -1963,7 +1964,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 			if m.mailtoURL != nil {
 				to, subject, body := parseMailto(m.mailtoURL)
 				composer := tui.NewComposerWithAccounts(cfg.Accounts, cfg.Accounts[0].ID, to, subject, body, cfg.HideTips)
-				m.applySpellcheckOptions(composer)
+				m.applyComposerOptions(composer)
 				m.current = composer
 			} else {
 				m.current = tui.NewChoice()
@@ -2161,7 +2162,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 		inReplyTo := msg.Email.MessageID
 		references := append(msg.Email.References, msg.Email.MessageID) //nolint:gocritic
 		composer.SetReplyContext(inReplyTo, references)
-		m.applySpellcheckOptions(composer)
+		m.applyComposerOptions(composer)
 		if m.config != nil && m.config.ShowOriginalOnReply {
 			sz := m.currentWindowSize()
 			replySplit := tui.NewReplySplitView(
@@ -2274,7 +2275,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 		references := append(msg.Email.References, msg.Email.MessageID) //nolint:gocritic
 		composer.SetReplyContext(inReplyTo, references)
 
-		m.applySpellcheckOptions(composer)
+		m.applyComposerOptions(composer)
 		if m.config != nil && m.config.ShowOriginalOnReply {
 			sz := m.currentWindowSize()
 			replySplit := tui.NewReplySplitView(
@@ -2322,7 +2323,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 		if m.config != nil {
 			composer.SetShowCcBcc(m.config.ShowCcBccByDefault)
 		}
-		m.applySpellcheckOptions(composer)
+		m.applyComposerOptions(composer)
 		m.current = composer
 		m.updateCurrentWindowSize()
 		m.syncPluginKeyBindings()

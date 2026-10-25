@@ -178,6 +178,8 @@
       "signature_configured": "skonfigurowany",
       "signature_not_configured": "nieskonfigurowany",
       "show_cc_bcc_by_default": "Pokaż CC/BCC domyślnie",
+      "composer_vim_mode": "Tryb Vim w edytorze wiadomości",
+      "composer_vim_mode_tip": "Edycja Vim dotyczy tylko treści wiadomości; pola odbiorcy i tematu pozostają bez zmian. F4 przełącza tryb Vim tylko dla bieżącej wiadomości.",
       "on": "WŁ",
       "off": "WYŁ",
       "restart_required": "Wymagane ponowne uruchomienie w celu zastosowania zmiany języka"

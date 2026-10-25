@@ -172,6 +172,8 @@
       "signature_configured": "已配置",
       "signature_not_configured": "未配置",
       "show_cc_bcc_by_default": "默认显示CC/BCC",
+      "composer_vim_mode": "撰写邮件时使用Vim模式",
+      "composer_vim_mode_tip": "Vim编辑仅用于邮件正文，收件人和主题字段保持不变。F4仅切换当前邮件编辑器的Vim模式。",
       "on": "开",
       "off": "关",
       "restart_required": "需要重新启动以应用语言更改"

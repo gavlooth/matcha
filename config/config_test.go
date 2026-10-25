@@ -27,6 +27,7 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	expectedConfig := &Config{
 		PaginationPageSize: &PaginationPageSize{Limit: 55},
 		ExternalEditor:     "nvim -c startinsert",
+		ComposerVimMode:    true,
 		Accounts: []Account{
 			{
 				ID:              "test-id-1",
@@ -93,6 +94,7 @@ func TestSaveAndLoadConfigInSecureModeKeepsSettings(t *testing.T) {
 		BodyCacheThresholdMB: 250,
 		UndoDelaySeconds:     12,
 		ExternalEditor:       "nvim -c startinsert",
+		ComposerVimMode:      true,
 		MouseEnabled:         &mouseEnabled,
 		PaginationPageSize:   &PaginationPageSize{HeightFactor: 0.5},
 		Theme:                "Matcha",

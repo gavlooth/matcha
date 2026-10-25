@@ -15,6 +15,7 @@ import (
 	overlay "github.com/floatpane/bubble-overlay"
 	shortcode "github.com/floatpane/go-emoji-shortcode"
 	"github.com/floatpane/matcha/config"
+	"github.com/floatpane/matcha/internal/vimedit"
 	"github.com/floatpane/matcha/pgp"
 	"github.com/floatpane/matcha/spellcheck"
 	"github.com/google/uuid"
@@ -76,6 +77,7 @@ type Composer struct {
 	subjectInput     textinput.Model
 	bodyInput        textarea.Model
 	signatureInput   textarea.Model
+	vimEditor        *vimedit.Editor
 	attachmentPaths  []string
 	attachmentNames  map[string]string
 	attachmentCursor int
@@ -602,6 +604,9 @@ func (m *Composer) updateSpellSuggestions() {
 	m.spellSuggestions = nil
 	m.spellWord = ""
 
+	if m.vimEditor != nil && m.vimEditor.Mode() != vimedit.Insert {
+		return
+	}
 	if m.disableSpellcheck || m.disableSpellSuggestions {
 		return
 	}
@@ -691,6 +696,9 @@ func (m *Composer) updateEmojiSuggestions() {
 	m.emojiShow = false
 	m.emojiSuggestions = nil
 	m.emojiShortcode = ""
+	if m.vimEditor != nil && m.vimEditor.Mode() != vimedit.Insert {
+		return
+	}
 
 	if m.focusIndex != focusBody {
 		return
@@ -953,6 +961,9 @@ func (m *Composer) setFocusTo(focus int) tea.Cmd {
 	m.bccInput.Blur()
 	m.subjectInput.Blur()
 	m.bodyInput.Blur()
+	if m.vimEditor != nil && m.focusIndex == focusBody && focus != focusBody {
+		m.vimEditor.Leave(&m.bodyInput)
+	}
 	m.signatureInput.Blur()
 	m.spellShow = false
 	m.spellSuggestions = nil
@@ -1211,6 +1222,14 @@ func (m *Composer) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 			}
 		}
 
+		if msg.String() == "f4" {
+			m.SetVimMode(m.vimEditor == nil)
+			return m, nil
+		}
+		if m.IsVimEditing() && (msg.String() == "esc" || msg.String() == "ctrl+[") {
+			return m, m.updateVimBody(msg)
+		}
+
 		// Spellcheck suggestion popup (only while body is focused).
 		if m.focusIndex == focusBody && m.spellShow && len(m.spellSuggestions) > 0 {
 			sk := config.Keybinds.Composer
@@ -1283,6 +1302,9 @@ func (m *Composer) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 
 		case kb.Composer.NextField, kb.Composer.PrevField:
 			previousFocus := m.focusIndex
+			if previousFocus == focusBody && m.vimEditor != nil {
+				m.vimEditor.Leave(&m.bodyInput)
+			}
 			focusList := m.orderedFocusIndices()
 			if msg.String() == kb.Composer.PrevField {
 				m.retreatFocus(focusList)
@@ -1498,8 +1520,12 @@ func (m *Composer) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 		prevBody := m.bodyInput.Value()
 		prevRow := m.bodyInput.Line()
 		prevCol := m.bodyInput.Column()
-		m.bodyInput, cmd = m.bodyInput.Update(msg)
-		cmds = append(cmds, cmd)
+		if m.vimEditor != nil {
+			cmds = append(cmds, m.updateVimBody(msg))
+		} else {
+			m.bodyInput, cmd = m.bodyInput.Update(msg)
+			cmds = append(cmds, cmd)
+		}
 		// Only recompute suggestions when the body state actually changes.
 		// Cursor-blink ticks otherwise reset spellSelected to 0 every blink.
 		if m.bodyInput.Value() != prevBody ||
@@ -1749,6 +1775,21 @@ func (m *Composer) View() tea.View { //nolint:gocyclo
 
 	mainContent := lipgloss.JoinVertical(lipgloss.Left, composerViewElements...)
 	helpText := keybindHelp("composer.help")
+	if m.vimEditor != nil && m.focusIndex == focusBody {
+		modeHelp := "Esc: normal"
+		switch m.vimEditor.Mode() {
+		case vimedit.Normal:
+			modeHelp = "i: insert • v/V: select • Esc: cancel command"
+		case vimedit.Visual, vimedit.VisualLine:
+			modeHelp = "d/c/y: selection • Esc: normal"
+		}
+		helpText = "Vim " + m.vimEditor.Mode().String() + " • F4: off • " + modeHelp + " • " +
+			ck.NextField + "/" + ck.PrevField + ": fields • " + ck.ExternalEditor + ": editor"
+	} else if m.vimEditor != nil {
+		helpText = "F4: Vim off (body enabled) • " + helpText
+	} else {
+		helpText = "F4: Vim on • " + helpText
+	}
 	for _, pk := range m.pluginKeyBindings {
 		helpText += " • " + pk.Key + ": " + pk.Description
 	}
@@ -2100,6 +2141,9 @@ func (m *Composer) GetBody() string {
 // SetBody updates the Body field with new content.
 func (m *Composer) SetBody(body string) {
 	m.bodyInput.SetValue(body)
+	if m.vimEditor != nil {
+		m.vimEditor.Reset()
+	}
 }
 
 // GetAttachmentPaths returns the current attachment paths.

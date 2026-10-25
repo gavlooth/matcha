@@ -172,6 +172,8 @@
       "signature_configured": "設定済み",
       "signature_not_configured": "未設定",
       "show_cc_bcc_by_default": "デフォルトでCC/BCCを表示",
+      "composer_vim_mode": "メール作成でVimモードを使用",
+      "composer_vim_mode_tip": "Vim編集は本文のみに適用され、宛先と件名の入力は変わりません。F4で現在作成中のメールのみVimモードを切り替えます。",
       "on": "オン",
       "off": "オフ",
       "restart_required": "言語変更を適用するには再起動が必要です"

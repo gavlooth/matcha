@@ -197,12 +197,12 @@ func SendEmailCmd(deps *Dependencies, msg tui.SendEmailMsg) tea.Cmd {
 func SendRSVP(account *config.Account, msg tui.SendRSVPMsg) tea.Cmd {
 	return func() tea.Msg {
 		if account == nil {
-			return tui.EmailResultMsg{Err: fmt.Errorf("no account configured")}
+			return tui.RSVPResultMsg{Err: fmt.Errorf("no account configured")}
 		}
 
 		rsvpICS, err := calendar.GenerateRSVP(msg.OriginalICS, account.Email, msg.Response)
 		if err != nil {
-			return tui.EmailResultMsg{Err: fmt.Errorf("generate RSVP: %w", err)}
+			return tui.RSVPResultMsg{Err: fmt.Errorf("generate RSVP: %w", err)}
 		}
 
 		subject := fmt.Sprintf("Re: %s", msg.Event.Summary)

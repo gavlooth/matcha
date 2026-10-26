@@ -71,11 +71,12 @@
       "what_to_do": "Co chciałbyś zrobić?",
       "compose": "Napisz Wiadomość",
       "inbox": "Zobacz Skrzynkę Odbiorczą",
+      "hidden_mail": "Ukryte wiadomości",
       "calendar": "Zobacz Kalendarz",
       "settings": "Ustawienia",
       "marketplace": "Sklep z Wtyczkami",
       "drafts": "Szkice",
-      "help": "Użyj {NavArrows} do nawigacji, enter do wyboru i {Quit} aby wyjść.",
+      "help": "Użyj {NavArrows} do nawigacji, enter do wyboru, H aby zobaczyć ukryte wiadomości i {Quit} aby wyjść.",
       "unknown": "nieznany",
       "update_available": "Dostępna aktualizacja: {latest} (zainstalowana: {current}) — uruchom `matcha update` aby zaktualizować"
     },

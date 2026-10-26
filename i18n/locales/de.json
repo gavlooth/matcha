@@ -71,11 +71,12 @@
       "what_to_do": "Was möchten Sie tun?",
       "compose": "E-Mail Verfassen",
       "inbox": "Posteingang Anzeigen",
+      "hidden_mail": "Verborgene E-Mails",
       "calendar": "Kalender Anzeigen",
       "settings": "Einstellungen",
       "marketplace": "Plugin-Marktplatz",
       "drafts": "Entwürfe",
-      "help": "Verwenden Sie {NavArrows} zum Navigieren, Enter zum Auswählen und {Quit} zum Beenden.",
+      "help": "Verwenden Sie {NavArrows} zum Navigieren, Enter zum Auswählen, H für verborgene E-Mails und {Quit} zum Beenden.",
       "unknown": "unbekannt",
       "update_available": "Update verfügbar: {latest} (installiert: {current}) — führen Sie `matcha update` aus, um zu aktualisieren"
     },

@@ -71,11 +71,12 @@
       "what_to_do": "何をしますか?",
       "compose": "メール作成",
       "inbox": "受信トレイを表示",
+      "hidden_mail": "非表示のメール",
       "calendar": "カレンダーを表示",
       "settings": "設定",
       "marketplace": "プラグインマーケットプレイス",
       "drafts": "下書き",
-      "help": "{NavArrows}で移動、Enterで選択、{Quit}で終了します。",
+      "help": "{NavArrows}で移動、Enterで選択、Hで非表示のメールを表示、{Quit}で終了します。",
       "unknown": "不明",
       "update_available": "アップデート利用可能: {latest} (インストール済み: {current}) — `matcha update`を実行してアップグレード"
     },

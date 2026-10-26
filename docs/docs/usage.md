@@ -19,8 +19,11 @@ On first launch, Matcha will prompt you to configure an email account. You'll ne
 
 - `↑/↓` or `j/k` - Navigate menu items
 - `Enter` - Select option
+- `H` - Open Hidden Mail for INBOX across all accounts
 - `Esc` - Go back / Exit
 - `Ctrl+C` - Quit application
+
+Select **Hidden Mail** in the main menu (or press `H`) to open messages hidden by account-address filtering. This opens INBOX across all accounts; use the account tabs to narrow the list.
 
 ### Inbox View
 
@@ -33,10 +36,10 @@ On first launch, Matcha will prompt you to configure an email account. You'll ne
 - `d` - Delete selected email
 - `a` - Archive selected email
 - `v` - Enter visual mode (multi-select)
-- `H` - Show hidden mail for the open folder and account tab
-- `Esc` - Back to main menu
+- `H` - Toggle hidden mail for the open folder and account tab
+- `Esc` - Leave hidden mail/search first; otherwise return to the main menu
 
-Press `H` to list hidden mail in the open folder for the selected account tab. Hidden mail names none of that account's addresses. Open a message to read it normally. Add an address to **Extra Addresses**, add a sender or domain to **Always Show Mail From**, or create a show-in-account mail rule to make matching mail appear in the normal inbox.
+Press `H` to list hidden mail in the open folder for the selected account tab. Press `H` again or `Esc` to return to ordinary mail. Switching account tabs keeps the hidden-mail view open for the selected account; switching folders returns to ordinary mail, where `H` opens that folder's hidden messages. The inbox shows an `H` hint beside its hidden count and in the help bar. Hidden mail names none of that account's addresses. Open a message to read it normally. Add an address to **Extra Addresses**, add a sender or domain to **Always Show Mail From**, or create a show-in-account mail rule to make matching mail appear in the normal inbox.
 
 In **Settings → Accounts**, select an account and press `a` to open **Suggested addresses** from hidden To/Cc recipients. They are not verified aliases: add only addresses that belong to you, not teachers, mailing lists or other recipients. Press `Enter` to add the highlighted address to **Extra Addresses**, `x` to ignore it, or `Esc` to return. Use **Always Show Mail From** or a show-in-account rule for Bcc course mail.
 

@@ -71,11 +71,12 @@
       "what_to_do": "O que você gostaria de fazer?",
       "compose": "Redigir E-mail",
       "inbox": "Ver Caixa de Entrada",
+      "hidden_mail": "E-mails ocultos",
       "calendar": "Ver Calendário",
       "settings": "Configurações",
       "marketplace": "Loja de Plugins",
       "drafts": "Rascunhos",
-      "help": "Use {NavArrows} para navegar, enter para selecionar e {Quit} para sair.",
+      "help": "Use {NavArrows} para navegar, enter para selecionar, H para ver e-mails ocultos e {Quit} para sair.",
       "unknown": "desconhecido",
       "update_available": "Atualização disponível: {latest} (instalada: {current}) — execute `matcha update` para atualizar"
     },

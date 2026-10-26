@@ -134,6 +134,8 @@ Standard [bubbletea](https://charm.land/bubbletea) key strings:
 
 Every bottom help bar is rendered from the active `keybinds.json`, so a remapped binding shows up in the help text after the next restart. Remap `email.reply` to `q` and the email view prints `q: reply` instead of `r: reply`.
 
+In a calendar invitation, click Accept, Decline, or Tentative when mouse support is enabled, or use the RSVP keybindings. After sending, the invitation shows **Response sent: Accepted**, **Declined**, or **Tentative** while it remains open, including in split preview. Sending failures show an error instead of a success confirmation.
+
 Arrow keys stay printed next to remapped navigation (`↑/↓/p/n`) because they always work, and translated help strings are built from the same bindings, so non-English users see their own keys too.
 
 Two places still document the built-in keys, because those handlers don't read config yet: the settings panes and the modal pickers (file picker, login, password prompt).

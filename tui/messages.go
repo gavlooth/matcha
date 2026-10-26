@@ -251,7 +251,9 @@ type ApplySearchResultsMsg struct {
 	Open   *fetcher.Email
 }
 
-type GoToInboxMsg struct{}
+type GoToInboxMsg struct {
+	Hidden bool
+}
 
 type GoToSentInboxMsg struct{}
 

@@ -1304,8 +1304,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 			fetchcmd.FetchFoldersCmd(m.config),
 			m.fetchFolderEmailsCmd(emailstore.FolderInbox),
 			idledaemon.ListenForIdleUpdates(m.idleUpdates),
+		}
+		if msg.Hidden {
+			batchCmds = append(batchCmds, m.folderInbox.GetInbox().ShowHiddenMail())
+		} else {
 			// Copy INBOX headers in the background so the first search matches while typing.
-			m.updateHeaderIndexCmd(emailstore.FolderInbox, ""),
+			batchCmds = append(batchCmds, m.updateHeaderIndexCmd(emailstore.FolderInbox, ""))
 		}
 		if m.service.IsDaemon() {
 			for _, acct := range m.config.Accounts {
@@ -2529,22 +2533,22 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 		if account == nil {
 			return m, m.showErrorCmd("account not found")
 		}
+		m.previousModel = m.current
 		m.current = tui.NewStatus("Sending RSVP...")
 		return m, tea.Batch(m.current.Init(), send.SendRSVP(account, msg))
 
 	case tui.RSVPResultMsg:
+		m.restoreView()
+		m.updateCurrentWindowSize()
 		if msg.Err != nil {
 			log.Printf("Failed to send RSVP: %v", msg.Err)
-			m.current = tui.NewChoice()
-			m.updateCurrentWindowSize()
-			return m, tea.Batch(m.current.Init(), m.showErrorCmd(msg.Err.Error()))
+			return m, m.showErrorCmd("RSVP not sent: " + msg.Err.Error())
 		}
-		status := fmt.Sprintf("RSVP sent: %s", msg.Response)
+		m.current, cmd = m.current.Update(msg)
 		if strings.HasSuffix(strings.ToLower(msg.Organizer), "@gmail.com") || strings.HasSuffix(strings.ToLower(msg.Organizer), "@googlemail.com") {
-			status += " (Google Calendar may not auto-update — use Gmail buttons for Google events)"
+			return m, tea.Batch(cmd, m.showInfoCmd("RSVP sent; Google Calendar may not auto-update."))
 		}
-		m.current = tui.NewStatus(status)
-		return m, tea.Tick(3*time.Second, func(t time.Time) tea.Msg { return tui.RestoreViewMsg{} })
+		return m, cmd
 
 	case tui.EmailResultMsg:
 		m.sendNotice = ""

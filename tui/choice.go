@@ -46,6 +46,7 @@ func NewChoice() Choice {
 	hasSavedDrafts := config.HasDrafts()
 	choices := []string{
 		"\ueb1c " + t("choice.inbox"),
+		"\ueb1c " + t("choice.hidden_mail"),
 		"\ueb1b " + t("choice.compose"),
 	}
 	if hasSavedDrafts {
@@ -113,26 +114,24 @@ func (m Choice) menuHeader() string {
 }
 
 func (m Choice) handleSelect() (tea.Model, tea.Cmd) {
-	idx := m.cursor
-	marketplaceIdx := 2
-	settingsIdx := 3
-	if m.hasSavedDrafts {
-		marketplaceIdx = 3
-		settingsIdx = 4
-	}
-	switch idx {
+	switch m.cursor {
 	case 0:
 		return m, func() tea.Msg { return GoToInboxMsg{} }
 	case 1:
+		return m, func() tea.Msg { return GoToInboxMsg{Hidden: true} }
+	case 2:
 		return m, func() tea.Msg { return GoToSendMsg{} }
-	case marketplaceIdx - 1:
+	case 3:
 		if m.hasSavedDrafts {
 			return m, func() tea.Msg { return GoToDraftsMsg{} }
 		}
 		return m, func() tea.Msg { return GoToMarketplaceMsg{} }
-	case marketplaceIdx:
-		return m, func() tea.Msg { return GoToMarketplaceMsg{} }
-	case settingsIdx:
+	case 4:
+		if m.hasSavedDrafts {
+			return m, func() tea.Msg { return GoToMarketplaceMsg{} }
+		}
+		return m, func() tea.Msg { return GoToSettingsMsg{} }
+	case 5:
 		return m, func() tea.Msg { return GoToSettingsMsg{} }
 	}
 	return m, nil
@@ -172,6 +171,8 @@ func (m Choice) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cursor = (m.cursor - 1 + len(m.choices)) % len(m.choices)
 		case keyDown, kb.Global.NavDown:
 			m.cursor = (m.cursor + 1) % len(m.choices)
+		case "H":
+			return m, func() tea.Msg { return GoToInboxMsg{Hidden: true} }
 		case keyEnter:
 			return m.handleSelect()
 		}

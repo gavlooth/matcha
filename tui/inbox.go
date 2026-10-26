@@ -489,12 +489,17 @@ func (m *Inbox) updateList() {
 	l.Styles.PaginationStyle = paginationStyle
 	l.Styles.HelpStyle = inboxHelpStyle
 	l.SetStatusBarItemName("email", "emails")
-	// The help bar is deliberately minimal: navigation essentials plus a hint
-	// for the command palette. Less-common actions (visual mode, threaded,
-	// delete, archive, refresh, search, …) are reachable from the palette
-	// instead of crowding the bar — see buildPaletteCommands in main.go.
+	// Keep hidden mail ahead of less-common actions so its shortcut is easy
+	// to discover alongside the main menu entry.
 	l.AdditionalShortHelpKeys = func() []key.Binding {
 		var bindings []key.Binding
+		if m.hiddenSearcher != nil {
+			label := "hidden mail"
+			if m.hiddenView {
+				label = "ordinary mail"
+			}
+			bindings = append(bindings, key.NewBinding(key.WithKeys("H"), key.WithHelp("H", label)))
+		}
 		if len(m.tabs) > 1 {
 			prevTab := kbKey(config.Keybinds.Inbox.PrevTab, "h")
 			nextTab := kbKey(config.Keybinds.Inbox.NextTab, "l")
@@ -820,6 +825,8 @@ func (m *Inbox) itemForEmail(email fetcher.Email, index int, showAccountLabel bo
 func (m *Inbox) getTitle() string {
 	var title string
 	switch {
+	case m.hiddenView:
+		title = "Hidden Mail"
 	case m.searchActive:
 		title = fmt.Sprintf("Search Results - %s", m.searchQuery)
 	case m.currentAccountID == "":
@@ -838,7 +845,12 @@ func (m *Inbox) getTitle() string {
 		}
 	}
 	if count := m.hiddenCount(); count > 0 {
-		title += fmt.Sprintf(" (%d hidden)", count)
+		if m.hiddenView {
+			title += fmt.Sprintf(" (%d hidden)", count)
+		} else {
+			// Put the access hint first so narrow titles do not truncate it.
+			title = fmt.Sprintf("(%d hidden: H) %s", count, title)
+		}
 	}
 	if m.isRefreshing {
 		title += " (refreshing...)"
@@ -849,7 +861,7 @@ func (m *Inbox) getTitle() string {
 	if m.isThreaded() {
 		title += " (threaded)"
 	}
-	if m.unreadOnly {
+	if m.unreadOnly && !m.hiddenView {
 		title += " (unread only)"
 	}
 	if m.pluginStatus != "" {
@@ -1065,20 +1077,19 @@ func (m *Inbox) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 		searchBinding := searchKey()
 		switch keypress := msg.String(); keypress {
 		case "H":
-			if m.hiddenSearcher == nil {
+			if m.hiddenView {
+				m.searchActive = false
+				m.searchQuery = ""
+				m.searchResults = nil
+				m.hiddenView = false
+				m.hiddenStatus = ""
+				m.visualMode = false
+				m.selectedUIDs = make(map[uint32]string)
+				m.selectionOrder = nil
+				m.updateList()
 				return m, nil
 			}
-			m.searchOverlay = nil
-			m.searchActive = true
-			m.searchQuery = "Hidden Mail"
-			m.hiddenView = true
-			m.refreshHiddenResults()
-			m.visualMode = false
-			m.selectedUIDs = make(map[uint32]string)
-			m.selectionOrder = []uint32{}
-			m.updateList()
-			opened := SearchOpenedMsg{FolderName: m.headerFolderName(), AccountID: m.currentAccountID}
-			return m, func() tea.Msg { return opened }
+			return m, m.ShowHiddenMail()
 		case searchBinding:
 			m.searchOverlay = NewSearchOverlay(m.width, m.height)
 			cmds := []tea.Cmd{m.searchOverlay.Init()}
@@ -1523,16 +1534,12 @@ func (m *Inbox) emailRowsTop() int {
 func (m *Inbox) switchToTab(index int) tea.Cmd {
 	m.activeTabIndex = index
 	m.currentAccountID = m.tabs[index].ID
+	if m.hiddenView {
+		return m.ShowHiddenMail()
+	}
 	m.visualMode = false
 	m.selectedUIDs = make(map[uint32]string)
 	m.selectionOrder = []uint32{}
-	if m.hiddenView {
-		m.searchActive = false
-		m.searchQuery = ""
-		m.searchResults = nil
-		m.hiddenView = false
-		m.hiddenStatus = ""
-	}
 	m.updateList()
 	return m.continueUnreadFetch()
 }
@@ -1753,6 +1760,25 @@ func (m *Inbox) SetLocalSearcher(local LocalSearcher) {
 func (m *Inbox) SetHiddenSearcher(searcher HiddenSearcher) {
 	m.hiddenSearcher = searcher
 	m.list.Title = m.getTitle()
+}
+
+// ShowHiddenMail opens hidden headers from the current folder and account tab.
+// The returned command asks the app to refresh that folder's local header copy.
+func (m *Inbox) ShowHiddenMail() tea.Cmd {
+	if m.hiddenSearcher == nil {
+		return nil
+	}
+	m.searchOverlay = nil
+	m.searchActive = true
+	m.searchQuery = "Hidden Mail"
+	m.hiddenView = true
+	m.refreshHiddenResults()
+	m.visualMode = false
+	m.selectedUIDs = make(map[uint32]string)
+	m.selectionOrder = []uint32{}
+	m.updateList()
+	opened := SearchOpenedMsg{FolderName: m.headerFolderName(), AccountID: m.currentAccountID}
+	return func() tea.Msg { return opened }
 }
 
 // refreshHiddenResults reads the current folder and tab without disturbing list

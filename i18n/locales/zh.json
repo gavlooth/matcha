@@ -71,11 +71,12 @@
       "what_to_do": "您想做什么?",
       "compose": "撰写邮件",
       "inbox": "查看收件箱",
+      "hidden_mail": "隐藏邮件",
       "calendar": "查看日历",
       "settings": "设置",
       "marketplace": "插件市场",
       "drafts": "草稿",
-      "help": "使用 {NavArrows} 导航,按 enter 选择,按 {Quit} 退出。",
+      "help": "使用 {NavArrows} 导航,按 enter 选择,按 H 查看隐藏邮件,按 {Quit} 退出。",
       "unknown": "未知",
       "update_available": "可用更新: {latest} (已安装: {current}) — 运行 `matcha update` 进行升级"
     },

@@ -11,6 +11,7 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	calendar "github.com/floatpane/go-icalendar"
 	"github.com/floatpane/matcha/config"
 	"github.com/floatpane/matcha/fetcher"
@@ -84,6 +85,7 @@ type EmailView struct {
 	pluginStatus        string
 	pluginKeyBindings   []PluginKeyBinding
 	hasCalendarInvite   bool
+	rsvpSent            string
 	calendarEvent       *calendar.Event
 	originalICSData     []byte
 	isPreviewMode       bool
@@ -266,6 +268,38 @@ func (m *EmailView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmds := make([]tea.Cmd, 0, 1)
 
 	switch msg := msg.(type) {
+	case RSVPResultMsg:
+		if msg.Err == nil {
+			switch msg.Response {
+			case "ACCEPTED":
+				m.rsvpSent = "Accepted"
+			case "DECLINED":
+				m.rsvpSent = "Declined"
+			case "TENTATIVE":
+				m.rsvpSent = "Tentative"
+			}
+		}
+		return m, nil
+	case tea.MouseClickMsg:
+		if msg.Button == tea.MouseLeft && m.hasCalendarInvite && m.calendarEvent != nil {
+			card := renderCalendarInvite(m.calendarEvent)
+			lines := strings.Split(card, "\n")
+			for y, line := range lines {
+				line = ansi.Strip(line)
+				if !strings.Contains(line, "Press 1:Accept  2:Decline  3:Tentative") {
+					continue
+				}
+				for _, action := range []struct{ label, response string }{
+					{"1:Accept", "ACCEPTED"}, {"2:Decline", "DECLINED"}, {"3:Tentative", "TENTATIVE"},
+				} {
+					if x := strings.LastIndex(line, action.label); x >= 0 &&
+						msg.Y == lipgloss.Height(m.renderHeader())+y &&
+						msg.X >= ansi.StringWidth(line[:x]) && msg.X < ansi.StringWidth(line[:x])+ansi.StringWidth(action.label) {
+						return m, m.sendRSVP(action.response)
+					}
+				}
+			}
+		}
 	case tea.KeyPressMsg:
 		if handled, handledCmd := m.handleKeyPress(msg); handled {
 			return handledCmd()
@@ -422,23 +456,7 @@ func (m *EmailView) handleEmailBodyKey(msg tea.KeyPressMsg) (bool, func() (tea.M
 	case kb.Email.RsvpAccept, kb.Email.RsvpDecline, kb.Email.RsvpTentative:
 		if m.hasCalendarInvite && m.calendarEvent != nil {
 			response := rsvpResponseFromKey(msg.String(), kb)
-			accountID := m.accountID
-			originalICS := m.originalICSData
-			event := m.calendarEvent
-			inReplyTo := m.email.MessageID
-			references := m.email.References
-			return true, func() (tea.Model, tea.Cmd) {
-				return m, func() tea.Msg {
-					return SendRSVPMsg{
-						OriginalICS: originalICS,
-						Event:       event,
-						Response:    response,
-						AccountID:   accountID,
-						InReplyTo:   inReplyTo,
-						References:  references,
-					}
-				}
-			}
+			return true, func() (tea.Model, tea.Cmd) { return m, m.sendRSVP(response) }
 		}
 	case kb.Email.ApplyPatch:
 		if m.isPatch && m.patchInfo != nil && m.patchInfo.HasDiff {
@@ -463,6 +481,19 @@ func (m *EmailView) handleEmailBodyKey(msg tea.KeyPressMsg) (bool, func() (tea.M
 		}
 	}
 	return false, nil
+}
+
+func (m *EmailView) sendRSVP(response string) tea.Cmd {
+	return func() tea.Msg {
+		return SendRSVPMsg{
+			OriginalICS: m.originalICSData,
+			Event:       m.calendarEvent,
+			Response:    response,
+			AccountID:   m.accountID,
+			InReplyTo:   m.email.MessageID,
+			References:  m.email.References,
+		}
+	}
 }
 
 // rsvpResponseFromKey maps an RSVP key to its calendar response string.
@@ -542,6 +573,9 @@ func (m *EmailView) View() tea.View {
 	calendarView := ""
 	if m.hasCalendarInvite && m.calendarEvent != nil {
 		calendarView = renderCalendarInvite(m.calendarEvent)
+		if m.rsvpSent != "" {
+			calendarView += "\nResponse sent: " + m.rsvpSent
+		}
 	}
 
 	var v tea.View

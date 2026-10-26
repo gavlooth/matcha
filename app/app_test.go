@@ -277,3 +277,35 @@ func TestCachedReplyRecipientsSurviveOpeningBody(t *testing.T) {
 		t.Fatalf("opening cached body lost delivery alias: From override = %q", got)
 	}
 }
+
+func TestRSVPResultRestoresEmail(t *testing.T) {
+	ics := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:test\r\nDTSTART:20261027T120000Z\r\nDTEND:20261027T130000Z\r\nSUMMARY:Meeting\r\nORGANIZER:mailto:organizer@example.com\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+	accounts := []config.Account{{ID: "a"}}
+	email := fetcher.Email{AccountID: "a", Attachments: []fetcher.Attachment{{IsCalendarInvite: true, Data: []byte(ics)}}}
+	for _, tc := range []struct {
+		response string
+		err      error
+		visible  string
+	}{
+		{"ACCEPTED", nil, "Response sent: Accepted"},
+		{"DECLINED", errors.New("send failed"), ""},
+	} {
+		view := tui.NewEmailView(email, 100, 40, tui.MailboxInbox, true)
+		m := &Model{current: view, config: &config.Config{Accounts: accounts}, palette: palette.New(), width: 100, height: 40}
+		m.Update(tui.SendRSVPMsg{AccountID: "a", Response: tc.response})
+		if m.current == view {
+			t.Fatal("sending status not shown")
+		}
+		m.Update(tui.RSVPResultMsg{Response: tc.response, Err: tc.err})
+		if m.current != view {
+			t.Fatal("email view not restored")
+		}
+		content := ansi.Strip(m.current.View().Content)
+		if tc.err == nil && !strings.Contains(content, tc.visible) {
+			t.Fatalf("missing response: %s", content)
+		}
+		if tc.err != nil && strings.Contains(content, "Response sent:") {
+			t.Fatal("failed response shown as sent")
+		}
+	}
+}

@@ -238,25 +238,139 @@ func TestInboxHiddenMailRefreshesAfterActiveFolderIndexLoads(t *testing.T) {
 		t.Fatalf("unchanged hidden results lost selection: visual=%v index=%d selected=%v order=%v", inbox.visualMode, inbox.list.Index(), inbox.selectedUIDs, inbox.selectionOrder)
 	}
 
-	inbox.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
-	if inbox.hiddenView || inbox.searchActive || inbox.hiddenStatus != "" || len(inbox.searchResults) != 0 {
-		t.Fatalf("account transition retained the previous hidden view: hidden=%v active=%v status=%q results=%+v", inbox.hiddenView, inbox.searchActive, inbox.hiddenStatus, inbox.searchResults)
+	_, cmd = inbox.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
+	if !inbox.hiddenView || !inbox.searchActive || inbox.visualMode || len(inbox.selectedUIDs) != 0 || len(inbox.selectionOrder) != 0 {
+		t.Fatalf("account transition left hidden mode or retained selection: hidden=%v active=%v visual=%v selected=%v order=%v", inbox.hiddenView, inbox.searchActive, inbox.visualMode, inbox.selectedUIDs, inbox.selectionOrder)
 	}
-	_, cmd = inbox.Update(tea.KeyPressMsg{Code: 'H', Text: "H"})
 	msgs = collectMsgs(cmd)
 	if len(msgs) != 1 {
 		t.Fatalf("new account load requests = %#v", msgs)
 	}
 	if opened, ok := msgs[0].(SearchOpenedMsg); !ok || opened.FolderName != "Archive" || opened.AccountID != "account-2" {
-		t.Fatalf("H requested the previous account: %#v", msgs[0])
+		t.Fatalf("tab change requested the previous account: %#v", msgs[0])
 	}
 	if inbox.emailsCount != 1 || inbox.searchResults[0].UID != 23 || !strings.Contains(inbox.hiddenStatus, "1 hidden mail:") {
 		t.Fatalf("new account hidden view has the wrong scope: count=%d results=%+v status=%q", inbox.emailsCount, inbox.searchResults, inbox.hiddenStatus)
+	}
+	_, cmd = inbox.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
+	msgs = collectMsgs(cmd)
+	if len(msgs) != 1 {
+		t.Fatalf("ALL account load requests = %#v", msgs)
+	}
+	if opened, ok := msgs[0].(SearchOpenedMsg); !ok || opened.FolderName != "Archive" || opened.AccountID != "" {
+		t.Fatalf("ALL tab requested the wrong scope: %#v", msgs[0])
+	}
+	if !inbox.hiddenView || !inbox.searchActive || inbox.emailsCount != 3 || len(inbox.searchResults) != 3 {
+		t.Fatalf("ALL tab did not retain every account's hidden mail: hidden=%v active=%v count=%d results=%+v", inbox.hiddenView, inbox.searchActive, inbox.emailsCount, inbox.searchResults)
 	}
 	hidden.emailsByFolder["Archive"] = nil
 	inbox.Update(LocalSearchIndexChangedMsg{})
 	if !inbox.hiddenView || !inbox.searchActive || inbox.emailsCount != 0 || !strings.Contains(inbox.hiddenStatus, "0 hidden mails:") || strings.Contains(inbox.list.Title, "1 hidden") {
 		t.Fatalf("empty update did not refresh the hidden view: hidden=%v active=%v count=%d title=%q status=%q", inbox.hiddenView, inbox.searchActive, inbox.emailsCount, inbox.list.Title, inbox.hiddenStatus)
+	}
+}
+
+func TestInboxShowHiddenMailAndHToggle(t *testing.T) {
+	for _, entry := range []string{"H", "ShowHiddenMail"} {
+		t.Run(entry, func(t *testing.T) {
+			accounts := []config.Account{{ID: "account-1", Email: "first@example.com"}}
+			normal := []fetcher.Email{
+				{UID: 1, AccountID: "account-1", Subject: "Ordinary unread mail"},
+				{UID: 2, AccountID: "account-1", Subject: "Ordinary read mail", IsRead: true},
+			}
+			hidden := fetcher.Email{UID: 12, AccountID: "account-1", Subject: "Read hidden mail", IsRead: true}
+			inbox := NewInbox(normal, accounts)
+			inbox.SetHiddenSearcher(&fakeHiddenSearcher{
+				counts: map[string]int{"account-1": 1},
+				emails: []fetcher.Email{hidden},
+			})
+			inbox.unreadOnly = true
+			inbox.visualMode = true
+			inbox.selectedUIDs[1] = "account-1"
+			inbox.selectionOrder = []uint32{1}
+
+			var cmd tea.Cmd
+			if entry == "H" {
+				_, cmd = inbox.Update(tea.KeyPressMsg{Code: 'H', Text: "H"})
+			} else {
+				cmd = inbox.ShowHiddenMail()
+			}
+			msgs := collectMsgs(cmd)
+			if len(msgs) != 1 {
+				t.Fatalf("hidden view load requests = %#v", msgs)
+			}
+			if opened, ok := msgs[0].(SearchOpenedMsg); !ok || opened.FolderName != "INBOX" || opened.AccountID != "" {
+				t.Fatalf("hidden view requested the wrong scope: %#v", msgs[0])
+			}
+			if !inbox.hiddenView || !inbox.searchActive || inbox.emailsCount != 1 || inbox.visualMode || len(inbox.selectedUIDs) != 0 || len(inbox.selectionOrder) != 0 {
+				t.Fatalf("hidden view did not open cleanly: hidden=%v active=%v count=%d visual=%v selected=%v order=%v", inbox.hiddenView, inbox.searchActive, inbox.emailsCount, inbox.visualMode, inbox.selectedUIDs, inbox.selectionOrder)
+			}
+			_, cmd = inbox.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+			msgs = collectMsgs(cmd)
+			if len(msgs) != 1 {
+				t.Fatalf("opening read hidden mail = %#v", msgs)
+			}
+			if opened, ok := msgs[0].(ViewEmailMsg); !ok || opened.AccountID != hidden.AccountID || opened.UID != hidden.UID || opened.Email == nil || !opened.Email.IsRead {
+				t.Fatalf("read hidden mail was not opened from the hidden results: %#v", msgs[0])
+			}
+
+			_, cmd = inbox.Update(tea.KeyPressMsg{Code: 'H', Text: "H"})
+			if len(collectMsgs(cmd)) != 0 || inbox.hiddenView || inbox.searchActive || inbox.searchQuery != "" || inbox.hiddenStatus != "" || len(inbox.searchResults) != 0 {
+				t.Fatalf("H did not return to ordinary mail: hidden=%v active=%v query=%q status=%q results=%+v", inbox.hiddenView, inbox.searchActive, inbox.searchQuery, inbox.hiddenStatus, inbox.searchResults)
+			}
+			if email := inbox.GetEmailAtIndex(0); !inbox.unreadOnly || inbox.emailsCount != 1 || email == nil || email.UID != 1 {
+				t.Fatalf("H did not restore the unread-only ordinary list: unread=%v count=%d email=%+v", inbox.unreadOnly, inbox.emailsCount, email)
+			}
+
+			inbox.ShowHiddenMail()
+			_, cmd = inbox.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+			if inbox.hiddenView || inbox.searchActive || inbox.hiddenStatus != "" || len(collectMsgs(cmd)) != 0 {
+				t.Fatalf("Esc did not leave hidden mail before the menu: hidden=%v active=%v status=%q", inbox.hiddenView, inbox.searchActive, inbox.hiddenStatus)
+			}
+		})
+	}
+}
+
+func TestInboxHiddenMailSurvivesSameFolderFetch(t *testing.T) {
+	accounts := []config.Account{{ID: "account-1", Email: "first@example.com"}}
+	inbox := NewInbox(nil, accounts)
+	inbox.SetFolderName("INBOX")
+	inbox.SetHiddenSearcher(&fakeHiddenSearcher{
+		counts: map[string]int{"account-1": 1},
+		emails: []fetcher.Email{{UID: 12, AccountID: "account-1", Subject: "Hidden mail"}},
+	})
+	inbox.ShowHiddenMail()
+
+	// The initial or refreshed folder fetch replaces ordinary mail after the
+	// hidden view has opened, without changing the current folder.
+	inbox.SetFolderName("INBOX")
+	inbox.SetEmails([]fetcher.Email{{UID: 1, AccountID: "account-1", Subject: "Fetched ordinary mail"}}, accounts)
+	inbox.Update(EmailsRefreshedMsg{Mailbox: MailboxInbox})
+	inbox.Update(EmailsAppendedMsg{
+		Mailbox:   MailboxInbox,
+		AccountID: "account-1",
+		Emails:    []fetcher.Email{{UID: 2, AccountID: "account-1", Subject: "Appended ordinary mail"}},
+	})
+	if email := inbox.GetEmailAtIndex(0); !inbox.hiddenView || !inbox.searchActive || inbox.emailsCount != 1 || email == nil || email.UID != 12 {
+		t.Fatalf("same-folder fetch replaced the hidden view: hidden=%v active=%v count=%d email=%+v", inbox.hiddenView, inbox.searchActive, inbox.emailsCount, email)
+	}
+	inbox.Update(tea.KeyPressMsg{Code: 'H', Text: "H"})
+	if first, second := inbox.GetEmailAtIndex(0), inbox.GetEmailAtIndex(1); inbox.hiddenView || inbox.emailsCount != 2 || first == nil || second == nil || first.UID != 1 || second.UID != 2 {
+		t.Fatalf("leaving hidden mail did not reveal fetched ordinary mail: hidden=%v count=%d first=%+v second=%+v", inbox.hiddenView, inbox.emailsCount, first, second)
+	}
+}
+
+func TestInboxHiddenMailAccessIsVisibleAtCompactWidth(t *testing.T) {
+	inbox := NewInbox(nil, []config.Account{{ID: "account-1", Email: "first@example.com"}})
+	inbox.SetHiddenSearcher(&fakeHiddenSearcher{counts: map[string]int{"account-1": 2}})
+	inbox.SetSize(40, 16)
+	bindings := inbox.list.AdditionalShortHelpKeys()
+	if len(bindings) == 0 || bindings[0].Help().Key != "H" {
+		t.Fatalf("hidden shortcut is not offered before less-common actions: %v", bindings)
+	}
+	view := ansi.Strip(inbox.View().Content)
+	if !strings.Contains(view, "2 hidden") || !strings.Contains(view, "H") {
+		t.Fatalf("compact inbox does not expose hidden mail access: %s", view)
 	}
 }
 

@@ -262,6 +262,13 @@ func (m *FolderInbox) Init() tea.Cmd {
 }
 
 func (m *FolderInbox) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
+	if result, ok := msg.(RSVPResultMsg); ok {
+		if m.previewPane != nil {
+			_, cmd := m.previewPane.Update(result)
+			return m, cmd
+		}
+		return m, nil
+	}
 	if _, ok := msg.(remoteImagesLoadedMsg); ok {
 		if m.previewPane != nil {
 			_, cmd := m.previewPane.Update(msg)
@@ -334,6 +341,23 @@ func (m *FolderInbox) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocycl
 	case tea.MouseClickMsg:
 		if msg.Button != tea.MouseLeft {
 			return m, nil
+		}
+		if m.previewPane != nil && m.inbox.searchOverlay == nil {
+			x, y := 0, 0
+			if isUIVisible("sidebar") {
+				x = lipgloss.Width(m.renderSidebar())
+			}
+			if m.isVerticalSplit() {
+				y = lipgloss.Height(m.renderInboxPane()) + 1
+			} else {
+				x += lipgloss.Width(m.renderInboxPane()) + 2
+			}
+			if msg.X >= x && msg.Y >= y {
+				msg.X -= x
+				msg.Y -= y
+				_, cmd := m.previewPane.Update(msg)
+				return m, cmd
+			}
 		}
 		if msg.X < m.effectiveSidebarWidth() {
 			if m.inbox.searchOverlay != nil {
@@ -571,7 +595,7 @@ func (m *FolderInbox) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocycl
 			rowOffset := m.calculateInboxHeight() + 1
 			m.previewPane = NewEmailViewPreview(*email, previewWidth, previewHeight, colOffset, rowOffset, m.disableImages)
 		} else {
-			previewWidth := m.calculatePreviewWidth()
+			previewWidth := m.calculatePreviewWidth() - 2
 			inboxWidth := m.calculateInboxWidth()
 			colOffset := sidebarWidth + 2 + inboxWidth + 2 // borders + padding
 			m.previewPane = NewEmailViewPreview(*email, previewWidth, m.height, colOffset, 0, m.disableImages)

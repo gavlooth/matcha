@@ -71,11 +71,12 @@
       "what_to_do": "ماذا تريد أن تفعل؟",
       "compose": "إنشاء بريد إلكتروني",
       "inbox": "عرض صندوق الوارد",
+      "hidden_mail": "البريد المخفي",
       "calendar": "عرض التقويم",
       "settings": "الإعدادات",
       "marketplace": "متجر الإضافات",
       "drafts": "المسودات",
-      "help": "استخدم {NavArrows} للتنقل، enter للاختيار، و{Quit} للخروج.",
+      "help": "استخدم {NavArrows} للتنقل، enter للاختيار، H لعرض البريد المخفي، و{Quit} للخروج.",
       "unknown": "غير معروف",
       "update_available": "تحديث متاح: {latest} (المثبت: {current}) — قم بتشغيل `matcha update` للترقية"
     },

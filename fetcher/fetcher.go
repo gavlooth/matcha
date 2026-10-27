@@ -440,8 +440,14 @@ func connectWithOptions(account *config.Account, extraOpts *imapclient.Options) 
 		}
 	}
 
+	authenticated := false
+	defer func() {
+		if !authenticated {
+			c.Close() //nolint:errcheck,gosec
+		}
+	}()
+
 	if err := c.WaitGreeting(); err != nil {
-		c.Close() //nolint:errcheck,gosec
 		return nil, err
 	}
 
@@ -457,7 +463,6 @@ func connectWithOptions(account *config.Account, extraOpts *imapclient.Options) 
 	} else {
 		password := account.ResolvePassword()
 		if password == "" {
-			c.Close() //nolint:errcheck,gosec
 			return nil, fmt.Errorf("no password available for %s: keyring or pass_cmd returned nothing (see https://docs.matcha.email/Features/PassCmd)", account.Email)
 		}
 		if err := c.Login(account.Email, password).Wait(); err != nil {
@@ -465,6 +470,7 @@ func connectWithOptions(account *config.Account, extraOpts *imapclient.Options) 
 		}
 	}
 
+	authenticated = true
 	return c, nil
 }
 

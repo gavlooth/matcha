@@ -2443,6 +2443,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocyclo
 		}
 		return m, m.showInfoCmd("Opened in browser")
 
+	case tui.OpenCalendarResponseMsg:
+		return m, exportcmd.OpenCalendarResponseCmd(msg.URL)
+
+	case tui.CalendarResponseOpenedMsg:
+		if msg.Err != nil {
+			return m, m.showErrorCmd(fmt.Sprintf("Failed to open calendar response: %v", msg.Err))
+		}
+		return m, m.showInfoCmd("Opened calendar response in browser; complete it there.")
+
 	case tui.SendEmailMsg:
 		if m.plugins != nil {
 			m.plugins.CallSendHook(plugin.HookEmailSendBefore, msg.To, msg.Cc, msg.Subject, msg.AccountID)

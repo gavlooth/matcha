@@ -7,7 +7,10 @@ package clib
 #include <stdlib.h>
 */
 import "C"
-import "unsafe"
+import (
+	stdhtml "html"
+	"unsafe"
+)
 
 // HTMLToElements parses HTML and returns structured elements.
 // This is a single-pass C parser that replaces goquery-based DOM parsing.
@@ -46,6 +49,9 @@ func HTMLToElements(html string) ([]HTMLElement, bool) {
 		}
 		if ce.attr1 != nil {
 			elements[i].Attr1 = C.GoString(ce.attr1)
+			if elements[i].Type == HElemLink {
+				elements[i].Attr1 = stdhtml.UnescapeString(elements[i].Attr1)
+			}
 		}
 		if ce.attr2 != nil {
 			elements[i].Attr2 = C.GoString(ce.attr2)

@@ -419,6 +419,16 @@ type EmailOpenedInBrowserMsg struct {
 	Err error
 }
 
+// OpenCalendarResponseMsg requests opening an invitation's original response URL.
+type OpenCalendarResponseMsg struct {
+	URL string
+}
+
+// CalendarResponseOpenedMsg reports whether the browser launcher succeeded.
+type CalendarResponseOpenedMsg struct {
+	Err error
+}
+
 // GoToSaveFilePickerMsg signals navigation to the save file picker for
 // email export.
 type GoToSaveFilePickerMsg struct {

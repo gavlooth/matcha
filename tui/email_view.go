@@ -299,6 +299,9 @@ func (m *EmailView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 			}
+			if link := m.calendarResponseURLAt(msg.X, msg.Y); link != "" {
+				return m, func() tea.Msg { return OpenCalendarResponseMsg{URL: link} }
+			}
 		}
 	case tea.KeyPressMsg:
 		if handled, handledCmd := m.handleKeyPress(msg); handled {
@@ -570,13 +573,7 @@ func (m *EmailView) View() tea.View {
 		m.renderVisibleImages(styledHeader)
 	}
 
-	calendarView := ""
-	if m.hasCalendarInvite && m.calendarEvent != nil {
-		calendarView = renderCalendarInvite(m.calendarEvent)
-		if m.rsvpSent != "" {
-			calendarView += "\nResponse sent: " + m.rsvpSent
-		}
-	}
+	calendarView := m.renderCalendarView()
 
 	var v tea.View
 	if calendarView != "" {
@@ -782,6 +779,17 @@ func wrapBodyToWidth(body string, width int) string {
 // GetEmail returns the email being viewed
 func (m *EmailView) GetEmail() fetcher.Email {
 	return m.email
+}
+
+func (m *EmailView) renderCalendarView() string {
+	if !m.hasCalendarInvite || m.calendarEvent == nil {
+		return ""
+	}
+	card := renderCalendarInvite(m.calendarEvent)
+	if m.rsvpSent != "" {
+		card += "\nResponse sent: " + m.rsvpSent
+	}
+	return card
 }
 
 // renderCalendarInvite renders a calendar invite card

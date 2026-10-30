@@ -134,7 +134,9 @@ Standard [bubbletea](https://charm.land/bubbletea) key strings:
 
 Every bottom help bar is rendered from the active `keybinds.json`, so a remapped binding shows up in the help text after the next restart. Remap `email.reply` to `q` and the email view prints `q: reply` instead of `r: reply`.
 
-In a calendar invitation, click Accept, Decline, or Tentative when mouse support is enabled, or use the RSVP keybindings. After sending, the invitation shows **Response sent: Accepted**, **Declined**, or **Tentative** while it remains open, including in split preview. Sending failures show an error instead of a success confirmation.
+In a calendar invitation, click **Accept**, **Decline**, or **Tentative** in Matcha's meeting card when mouse support is enabled, or use the RSVP keybindings. These actions email an RSVP to the organizer. After sending, the invitation shows **Response sent: Accepted**, **Declined**, or **Tentative** while it remains open, including in split preview. Sending failures show an error instead of a success confirmation.
+
+The original Google Calendar **Yes / No / Maybe** links in the email body are also clickable, including after scrolling and in split preview. They open the invitation's original response page in your browser; complete the response there. Opening that page does not display an emailed-RSVP success message.
 
 Arrow keys stay printed next to remapped navigation (`↑/↓/p/n`) because they always work, and translated help strings are built from the same bindings, so non-English users see their own keys too.
 

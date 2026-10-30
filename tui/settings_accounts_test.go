@@ -11,6 +11,22 @@ import (
 	"github.com/floatpane/matcha/internal/headerindex"
 )
 
+func TestEnterOpensAccountSettings(t *testing.T) {
+	settings := NewSettings(&config.Config{Accounts: []config.Account{{ID: "duth", Email: "chrichat57"}}})
+	_, cmd := settings.updateAccounts(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("enter did not open account settings")
+	}
+	if msg, ok := cmd().(GoToEditAccountMsg); !ok || msg.AccountID != "duth" {
+		t.Fatalf("enter returned %#v", cmd())
+	}
+	settings.accountsCursor = 1
+	_, cmd = settings.updateAccounts(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if _, ok := cmd().(GoToAddAccountMsg); !ok {
+		t.Fatal("enter did not open add account")
+	}
+}
+
 func TestSuggestedAddressesSaveAndIgnore(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

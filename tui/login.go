@@ -549,7 +549,7 @@ func (m *Login) View() tea.View {
 	case inputName:
 		tip = "The name that will appear on emails you send."
 	case inputEmail:
-		tip = "Your full email address used to log in."
+		tip = "Your server login name, which may be a full email address or a username."
 	case inputFetchEmail:
 		tip = "The email address to fetch messages for (comma-separated for multiple, e.g. me@icloud.com,me@mac.com)."
 	case inputSendAsEmail:
@@ -561,7 +561,7 @@ func (m *Login) View() tea.View {
 			tip = "Type 'oauth2' for OAuth2 or 'password' for app password."
 		}
 	case inputPassword:
-		tip = "Your password or an app-specific password if using 2FA."
+		tip = "Enter your password. When editing, leave this blank to keep the saved password."
 	case inputIMAPServer:
 		tip = "The server address for receiving emails."
 	case inputIMAPPort:

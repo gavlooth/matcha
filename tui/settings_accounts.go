@@ -55,7 +55,10 @@ func (m *Settings) updateAccounts(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.accountsCursor < len(m.cfg.Accounts) && len(m.cfg.Accounts) > 0 {
 			m.confirmingDelete = true
 		}
-	case "e":
+	case "e", keyEnter:
+		if m.accountsCursor == len(m.cfg.Accounts) {
+			return m, func() tea.Msg { return GoToAddAccountMsg{} }
+		}
 		if m.accountsCursor < len(m.cfg.Accounts) {
 			acc := m.cfg.Accounts[m.accountsCursor]
 			return m, func() tea.Msg {
@@ -96,13 +99,6 @@ func (m *Settings) updateAccounts(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	case "c": // Quick shortcut to crypto config
 		if m.accountsCursor < len(m.cfg.Accounts) {
-			m.enterCryptoConfig()
-			return m, textinput.Blink
-		}
-	case keyEnter:
-		if m.accountsCursor == len(m.cfg.Accounts) {
-			return m, func() tea.Msg { return GoToAddAccountMsg{} }
-		} else if m.accountsCursor < len(m.cfg.Accounts) {
 			m.enterCryptoConfig()
 			return m, textinput.Blink
 		}
